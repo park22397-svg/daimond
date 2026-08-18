@@ -1,0 +1,459 @@
+{
+  "잠근_날": "2026-08-18",
+  "왜": "사람이 눈으로 보고 하나하나 맞춘 값이다. 다시 계산하거나 어림잡아 바꾸면 안 된다.",
+  "표정_수": 30,
+  "표정": {
+    "sorrow": {
+      "label": "슬픔",
+      "blendshapes": {
+        "sorrow": 0.8
+      },
+      "fallback_blendshapes": {},
+      "morphs": {},
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3000,
+      "source": "base",
+      "is_reply_emotion": true
+    },
+    "angry": {
+      "label": "화남",
+      "blendshapes": {
+        "angry": 0.8
+      },
+      "fallback_blendshapes": {},
+      "morphs": {},
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3000,
+      "source": "base",
+      "is_reply_emotion": true
+    },
+    "surprised": {
+      "label": "놀람",
+      "blendshapes": {},
+      "fallback_blendshapes": {
+        "joy": 0.18,
+        "fun": 0.12
+      },
+      "morphs": {},
+      "auto_detect": "surprised",
+      "auto_weight": 0.8,
+      "hold_ms": 1000,
+      "source": "base",
+      "is_reply_emotion": true
+    },
+    "fun": {
+      "label": "즐거움",
+      "blendshapes": {
+        "fun": 0.8,
+        "joy": 0.25
+      },
+      "fallback_blendshapes": {},
+      "morphs": {},
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3000,
+      "source": "base",
+      "is_reply_emotion": true
+    },
+    "joy": {
+      "label": "기쁨",
+      "blendshapes": {
+        "joy": 1.0,
+        "fun": 0.4
+      },
+      "fallback_blendshapes": {},
+      "morphs": {},
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3000,
+      "source": "base",
+      "is_reply_emotion": true
+    },
+    "neutral": {
+      "label": "평온",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {},
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 0,
+      "source": "base",
+      "is_reply_emotion": true
+    },
+    "wink": {
+      "label": "윙크",
+      "blendshapes": {
+        "blink_l": 0.55,
+        "joy": 0.35
+      },
+      "fallback_blendshapes": {},
+      "morphs": {},
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 1200,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "wink_r": {
+      "label": "반대쪽 윙크",
+      "blendshapes": {
+        "blink_r": 0.55,
+        "joy": 0.35
+      },
+      "fallback_blendshapes": {},
+      "morphs": {},
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 1200,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "eyes_closed": {
+      "label": "눈 감기",
+      "blendshapes": {
+        "blink": 1.0
+      },
+      "fallback_blendshapes": {},
+      "morphs": {},
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 2600,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "hollow": {
+      "label": "빈 눈",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Highlight_Hide": 1.0
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 4000,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "hollow_smile": {
+      "label": "빈 눈으로 웃기",
+      "blendshapes": {
+        "joy": 0.5
+      },
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Highlight_Hide": 1.0,
+        "Fcl_MTH_Joy": 0.7
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 4000,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "forced_smile": {
+      "label": "억지웃음",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_MTH_Joy": 0.85,
+        "Fcl_BRW_Sorrow": 0.8,
+        "Fcl_EYE_Sorrow": 0.35
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3500,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "wide_eyes": {
+      "label": "눈 크게 뜨기",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Spread": 1.0,
+        "Fcl_BRW_Surprised": 0.6
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 1600,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "pout": {
+      "label": "삐죽",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_MTH_Down": 0.8,
+        "Fcl_MTH_Small": 0.5,
+        "Fcl_BRW_Sorrow": 0.55
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3000,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "eye_smile": {
+      "label": "눈웃음",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Joy": 1.0,
+        "Fcl_MTH_Fun": 0.7,
+        "Fcl_BRW_Joy": 0.6
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 2800,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "glare": {
+      "label": "째려보기",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Angry": 1.0,
+        "Fcl_EYE_Close": 0.3,
+        "Fcl_BRW_Angry": 0.5,
+        "Fcl_MTH_Small": 0.6
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 2400,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "huff": {
+      "label": "새침",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_BRW_Angry": 0.35,
+        "Fcl_EYE_Close": 0.45,
+        "Fcl_MTH_Up": 0.5,
+        "Fcl_MTH_Small": 0.4
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 2200,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "fluster": {
+      "label": "당황",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Spread": 0.8,
+        "Fcl_BRW_Sorrow": 0.7,
+        "Fcl_MTH_Large": 0.35,
+        "Fcl_EYE_Highlight_Hide": 0.25
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 1800,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "teary": {
+      "label": "눈물 고임",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Spread": 0.55,
+        "Fcl_EYE_Sorrow": 0.5,
+        "Fcl_BRW_Sorrow": 1.0,
+        "Fcl_MTH_Small": 0.5
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3000,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "wail": {
+      "label": "울음",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Close": 1.0,
+        "Fcl_BRW_Sorrow": 1.0,
+        "Fcl_MTH_Large": 0.8,
+        "Fcl_MTH_Sorrow": 0.6,
+        "Fcl_HA_Fung1": 0.4
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3200,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "grin": {
+      "label": "헤벌쭉",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_MTH_A": 0.85,
+        "Fcl_MTH_Large": 0.3,
+        "Fcl_HA_Fung1": 0.75,
+        "Fcl_EYE_Joy": 0.65,
+        "Fcl_BRW_Joy": 0.5
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 2800,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "gloom": {
+      "label": "시무룩",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_MTH_Sorrow": 1.0,
+        "Fcl_MTH_Small": 0.3,
+        "Fcl_BRW_Sorrow": 0.8,
+        "Fcl_EYE_Sorrow": 0.4
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 2600,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "shock": {
+      "label": "경악",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Spread": 1.0,
+        "Fcl_BRW_Surprised": 1.0,
+        "Fcl_MTH_Surprised": 0.8,
+        "Fcl_EYE_Highlight_Hide": 0.55
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 1600,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "sigh_face": {
+      "label": "체념",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Close": 0.8,
+        "Fcl_BRW_Sorrow": 0.5,
+        "Fcl_MTH_Down": 0.35
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 2400,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "soft_gaze": {
+      "label": "지그시 보기",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Close": 0.35,
+        "Fcl_MTH_Up": 0.45,
+        "Fcl_BRW_Joy": 0.3
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3000,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "peak_joy": {
+      "label": "절정 기쁨",
+      "blendshapes": {
+        "joy": 1.0,
+        "fun": 0.4
+      },
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_MTH_Large": 0.45,
+        "Fcl_HA_Fung1": 0.6
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3500,
+      "source": "special",
+      "is_reply_emotion": false
+    },
+    "peak_fun": {
+      "label": "절정 즐거움",
+      "blendshapes": {
+        "fun": 1.0,
+        "joy": 0.35
+      },
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_MTH_Large": 0.3,
+        "Fcl_HA_Fung1": 0.45,
+        "Fcl_EYE_Spread": 0.15
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3500,
+      "source": "special",
+      "is_reply_emotion": false
+    },
+    "peak_angry": {
+      "label": "절정 화남",
+      "blendshapes": {
+        "angry": 1.0
+      },
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_BRW_Angry": 0.25,
+        "Fcl_HA_Fung1": 0.35,
+        "Fcl_EYE_Highlight_Hide": 0.3
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3500,
+      "source": "special",
+      "is_reply_emotion": false
+    },
+    "peak_sorrow": {
+      "label": "절정 슬픔",
+      "blendshapes": {
+        "sorrow": 1.0
+      },
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_BRW_Sorrow": 0.35,
+        "Fcl_MTH_Sorrow": 0.5
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 3500,
+      "source": "special",
+      "is_reply_emotion": false
+    },
+    "peak_surprised": {
+      "label": "절정 놀람",
+      "blendshapes": {},
+      "fallback_blendshapes": {
+        "surprised": 1.0
+      },
+      "morphs": {
+        "Fcl_EYE_Spread": 0.7,
+        "Fcl_EYE_Highlight_Hide": 0.5
+      },
+      "auto_detect": "surprised",
+      "auto_weight": 1.0,
+      "hold_ms": 2000,
+      "source": "special",
+      "is_reply_emotion": false
+    }
+  }
+}

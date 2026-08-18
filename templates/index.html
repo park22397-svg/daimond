@@ -1,0 +1,5572 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>diamondAI - Virtual Avatar</title>
+
+    <!-- THREE.js 및 THREE-VRM CDN -->
+    <script src="https://unpkg.com/three@0.137.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.137.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://unpkg.com/three@0.137.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a24;
+            color: #fff;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #avatar-container {
+            flex: 1;
+            position: relative;
+            background: radial-gradient(circle, #2c2d42 0%, #0f0f17 100%);
+        }
+
+        #canvas3d {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* 지금 무엇으로 만지는지 */
+        #tool-badge {
+            position: absolute;
+            left: 14px;
+            top: 14px;
+            background: rgba(20, 22, 42, 0.72);
+            border: 1px solid #3a3f68;
+            color: #dfe1f0;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            z-index: 12;
+            cursor: context-menu;
+            user-select: none;
+        }
+
+        /* 가위바위보 */
+        #rps-bar {
+            position: absolute;
+            left: 14px;
+            top: 52px;
+            z-index: 12;
+            user-select: none;
+        }
+
+        #rps-open {
+            background: rgba(20, 22, 42, 0.72);
+            border: 1px solid #3a3f68;
+            color: #dfe1f0;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        #rps-open:hover { background: rgba(42, 47, 82, 0.9); }
+
+        #rps-open.on { background: #4a3f77; border-color: #7a68b0; }
+
+        /* 말로 가위바위보를 청했을 때 어느 단추인지 알려준다 */
+        #rps-open.call { animation: rpscall 0.85s ease-in-out 4; }
+
+        @keyframes rpscall {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(160, 140, 230, 0.0);
+                transform: scale(1);
+            }
+            45% {
+                box-shadow: 0 0 0 9px rgba(160, 140, 230, 0.32);
+                transform: scale(1.07);
+            }
+        }
+
+        #rps-hands {
+            display: none;
+            gap: 6px;
+            margin-top: 7px;
+        }
+
+        #rps-hands.open { display: flex; }
+
+        #rps-hands button {
+            background: rgba(20, 22, 42, 0.82);
+            border: 1px solid #3a3f68;
+            color: #dfe1f0;
+            width: 46px;
+            height: 46px;
+            border-radius: 12px;
+            font-size: 1.25rem;
+            cursor: pointer;
+            font-family: inherit;
+            line-height: 1;
+        }
+
+        #rps-hands button:hover:not(:disabled) {
+            background: #353b68;
+            transform: translateY(-2px);
+        }
+
+        #rps-hands button:disabled { opacity: 0.45; cursor: default; }
+
+        #rps-hands button b {
+            display: block;
+            font-size: 0.62rem;
+            font-weight: 500;
+            color: #8f93b8;
+            margin-top: 2px;
+        }
+
+        /* 우클릭 도구 고르기 */
+        #tool-menu {
+            position: absolute;
+            display: none;
+            background: #1b1e36;
+            border: 1px solid #3a3f68;
+            border-radius: 10px;
+            padding: 6px;
+            z-index: 30;
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+            min-width: 178px;
+            user-select: none;
+        }
+
+        #tool-menu .head {
+            font-size: 0.72rem;
+            color: #8f93b8;
+            padding: 4px 10px 7px;
+            border-bottom: 1px solid #2c3050;
+            margin-bottom: 4px;
+        }
+
+        #tool-menu .item {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 7px 10px;
+            border-radius: 7px;
+            cursor: pointer;
+            color: #dfe1f0;
+            font-size: 0.88rem;
+        }
+
+        #tool-menu .item:hover { background: #2a2f52; }
+
+        #tool-menu .item.on { background: #4a3f77; }
+
+        #tool-menu .item .icon { font-size: 1.05rem; width: 20px; text-align: center; }
+
+        #tool-menu .item .desc {
+            display: block;
+            font-size: 0.72rem;
+            color: #8f93b8;
+        }
+
+        #tool-menu .item.locked { opacity: 0.5; }
+
+        #tool-menu .item .lock {
+            margin-left: auto;
+            font-size: 0.7rem;
+            color: #d9a441;
+        }
+
+        /* 지금 어떤 사이이고 어떤 기분인지 */
+        #state-panel {
+            position: absolute;
+            right: 14px;
+            top: 14px;
+            width: 210px;
+            background: rgba(20, 22, 42, 0.72);
+            border: 1px solid #3a3f68;
+            border-radius: 12px;
+            padding: 11px 13px 12px;
+            z-index: 12;
+            color: #dfe1f0;
+            font-size: 0.82rem;
+            user-select: none;
+        }
+
+        #state-panel .row {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        #state-panel .cap {
+            color: #8f93b8;
+            font-size: 0.72rem;
+            width: 26px;
+        }
+
+        #stage-label { font-weight: 700; }
+
+        #affinity-num {
+            margin-left: auto;
+            color: #8f93b8;
+            font-variant-numeric: tabular-nums;
+        }
+
+        #affinity-track {
+            position: relative;
+            height: 8px;
+            margin-top: 8px;
+            background: #101228;
+            border-radius: 999px;
+            overflow: visible;
+        }
+
+        #affinity-fill {
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 0;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #4a6fb0, #a05a8a);
+            transition: width 0.6s ease;
+        }
+
+        #affinity-marks { position: absolute; inset: 0; }
+
+        #affinity-marks i {
+            position: absolute;
+            top: -2px;
+            width: 1px;
+            height: 12px;
+            background: #4a4f78;
+        }
+
+        #affinity-knob {
+            position: absolute;
+            top: -3px;
+            width: 14px;
+            height: 14px;
+            margin-left: -7px;
+            border-radius: 50%;
+            background: #e8e9f5;
+            box-shadow: 0 0 8px rgba(230, 231, 245, 0.5);
+            transition: left 0.6s ease;
+        }
+
+        #mood-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #8f93b8;
+            transition: background 0.35s ease;
+            display: inline-block;
+        }
+
+        #mood-label { font-weight: 700; }
+
+        #mood-bars {
+            display: flex;
+            gap: 4px;
+            margin-top: 8px;
+        }
+
+        #touch-zones {
+            font-size: 0.72rem;
+            line-height: 1.6;
+            color: #8f93b8;
+        }
+
+        #touch-zones b { color: #dfe1f0; font-weight: 600; }
+        #touch-zones i { color: #6a6e90; font-style: normal; }
+
+        #mood-bars .m {
+            flex: 1;
+            height: 4px;
+            border-radius: 999px;
+            background: #262a4a;
+            transition: background 0.3s ease, opacity 0.3s ease;
+            opacity: 0.5;
+        }
+
+        /* 친밀도가 움직일 때 뜨는 숫자 */
+        #affinity-pop {
+            position: absolute;
+            right: 26px;
+            top: 44px;
+            z-index: 13;
+            font-weight: 800;
+            font-size: 1rem;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #affinity-pop.up { color: #86e08a; }
+        #affinity-pop.down { color: #ff8b8b; }
+
+        #affinity-pop.show {
+            animation: popfloat 1.3s ease-out;
+        }
+
+        @keyframes popfloat {
+            0%   { opacity: 0; transform: translateY(6px); }
+            18%  { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-22px); }
+        }
+
+        /* 말풍선 */
+        #speech-bubble {
+            position: absolute;
+            /* 자리는 화면이 매 프레임 얼굴 옆으로 옮긴다.
+               아래 값은 아직 머리를 못 찾았을 때만 쓰인다.
+               왼쪽 끝을 얼굴에 붙이므로 0, 세로는 가운데 -50%.
+               (다이아가 이쪽을 보고 서 있어 그의 왼쪽은 화면에서 오른쪽이다) */
+            top: 30%;
+            left: 55%;
+            transform: translate(0, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            color: #222;
+            padding: 15px 22px;
+            border-radius: 18px;
+            font-size: 0.95rem;
+            max-width: 320px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            display: none;
+            z-index: 10;
+            font-weight: 600;
+            transition: opacity 0.5s ease;
+        }
+
+        #speech-bubble::after {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: -12px;
+            border-width: 8px 12px 8px 0;
+            border-style: solid;
+            border-color:
+                transparent
+                rgba(255, 255, 255, 0.95)
+                transparent
+                transparent;
+        }
+
+        /* 수면 표시 */
+#zzz-indicator {
+    position: absolute;
+    /* 귀 높이에 뜬다.
+       25% 는 턱과 입 사이라 자는 표시가 얼굴에 걸쳐 보였다.
+       이 카메라(fov 30, 거리 1.65)에서 화면 1% 는 약 0.9cm 이고
+       입에서 귀까지가 6cm 남짓이라, 그만큼 올린 값이다. */
+    top: 18%;
+    left: 58%;
+    font-size: 3.2rem;
+    font-weight: bold;
+    color: #a29bfe;
+    animation: sleepFloat 2s infinite ease-in-out;
+    display: none; 
+    z-index: 10;
+}
+
+
+        @keyframes sleepFloat {
+            0% {
+                transform: translateY(0) scale(0.8);
+                opacity: 0.3;
+            }
+
+            50% {
+                transform: translateY(-20px) scale(1.2);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translateY(-40px) scale(0.8);
+                opacity: 0;
+            }
+        }
+
+        #chat-container {
+            width: 380px;
+            background: #12121a;
+            border-left: 1px solid #2a2a3a;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #chat-header {
+            padding: 20px;
+            background: #1a1a26;
+            border-bottom: 1px solid #2a2a3a;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #74b9ff;
+        }
+
+        #chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .msg {
+            max-width: 80%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            line-height: 1.4;
+            word-break: break-word;
+        }
+
+        .user-msg {
+            align-self: flex-end;
+            background: #0984e3;
+            color: #fff;
+        }
+
+        .ai-msg {
+            align-self: flex-start;
+            background: #2d3436;
+            color: #dfe6e9;
+        }
+
+        #chat-input-area {
+            padding: 15px;
+            background: #1a1a26;
+            display: flex;
+            gap: 10px;
+        }
+
+        #chat-input {
+            flex: 1;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            background: #0f0f17;
+            color: #fff;
+            outline: none;
+        }
+
+        #send-btn {
+            padding: 12px 18px;
+            border-radius: 8px;
+            border: none;
+            background: #6c5ce7;
+            color: #fff;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        #send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="avatar-container">
+
+        <div id="speech-bubble">...</div>
+
+        <div id="zzz-indicator">💤</div>
+
+        <canvas id="canvas3d"></canvas>
+
+        <!-- 지금 무엇으로 만지고 있는지 -->
+        <div id="tool-badge" title="우클릭해서 바꾸기">🖐 손</div>
+
+        <!-- 가위바위보 -->
+        <div id="rps-bar">
+            <button id="rps-open">✌ 가위바위보</button>
+            <div id="rps-hands"></div>
+        </div>
+
+        <!-- 우클릭하면 뜨는 도구 고르기 -->
+        <div id="tool-menu"></div>
+
+        <!-- 지금 어떤 사이이고 어떤 기분인지 -->
+        <div id="state-panel">
+
+            <div class="row">
+                <span class="cap">호감</span>
+                <span id="stage-label">…</span>
+                <span id="affinity-num">0</span>
+            </div>
+
+            <div id="affinity-track">
+                <div id="affinity-fill"></div>
+                <div id="affinity-marks"></div>
+                <div id="affinity-knob"></div>
+            </div>
+
+            <div class="row" style="margin-top:9px">
+                <span class="cap">기분</span>
+                <span id="mood-dot"></span>
+                <span id="mood-label">평온</span>
+            </div>
+
+            <div id="mood-bars"></div>
+
+            <div class="row" style="margin-top:9px; align-items:flex-start">
+                <span class="cap">터치</span>
+                <span id="touch-zones"></span>
+            </div>
+
+        </div>
+
+        <div id="affinity-pop"></div>
+
+    </div>
+
+    <div id="chat-container">
+
+        <div id="chat-header">
+            diamondAI Chat
+        </div>
+
+        <div id="chat-messages"></div>
+
+        <div id="chat-input-area">
+
+            <input
+                type="text"
+                id="chat-input"
+                placeholder="메시지를 입력하세요..."
+            >
+
+            <button id="send-btn">
+                전송
+            </button>
+
+        </div>
+
+    </div>
+
+    <script>
+
+        // ============================================================
+        // THREE.JS 기본 설정
+        // ============================================================
+
+        const canvas = document.getElementById('canvas3d');
+
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(
+            30,
+            canvas.clientWidth / canvas.clientHeight,
+            0.1,
+            20.0
+        );
+
+        // 화면에서 아바타가 앉는 높이.
+        //
+        // 눈이 화면 위쪽에 걸려 있어서, 눈이 지금 목이 있던 자리로
+        // 내려오도록 시점을 통째로 7.3cm 올렸다.
+        // (머리 본 1.264 - 목 본 1.191 = 0.073)
+        // 카메라와 바라보는 곳을 같은 만큼 올리므로 각도는 그대로다.
+        const VIEW_LIFT = 0.073;
+
+        camera.position.set(0.0, 1.15 + VIEW_LIFT, 1.65);
+
+        const renderer = new THREE.WebGLRenderer({
+            canvas: canvas,
+            antialias: true,
+            alpha: true
+        });
+
+        renderer.setSize(
+            canvas.clientWidth,
+            canvas.clientHeight
+        );
+
+        renderer.setPixelRatio(
+            Math.min(window.devicePixelRatio, 2)
+        );
+
+        // 조명 — 한 방향에서만 고르게 비추면 쇄골이나 목선 같은 굴곡이 죽는다.
+        // 주광을 비스듬히 세우고 반대편에서 약한 빛을 하나 더 넣어
+        // 그늘이 생기게 한다. 전체 밝기는 낮춰서 대비를 살린다.
+        const light = new THREE.DirectionalLight(0xfff4e8, 1.25);
+        light.position.set(0.8, 1.35, 0.9).normalize();
+        scene.add(light);
+
+        // 뒤에서 윤곽을 살려 주는 빛
+        const rimLight = new THREE.DirectionalLight(0xa8b6ff, 0.55);
+        rimLight.position.set(-0.9, 0.5, -1.0).normalize();
+        scene.add(rimLight);
+
+        // 아래에서 아주 약하게 받쳐 얼굴이 새까매지지 않게
+        const fillLight = new THREE.DirectionalLight(0xffffff, 0.18);
+        fillLight.position.set(0, -1, 0.4).normalize();
+        scene.add(fillLight);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.28);
+        scene.add(ambientLight);
+
+
+        // ------------------------------------------------------------
+        // 바닥
+        //
+        // 격자만 있으면 허공에 떠 있는 것처럼 보인다.
+        // 가장자리로 갈수록 옅어지는 원판을 깔고 발밑에 그림자를 둔다.
+        // 그림 파일 없이 캔버스로 만들어 쓴다.
+        // ------------------------------------------------------------
+
+        function makeFadeTexture(inner, outer, stops) {
+            const c = document.createElement('canvas');
+            c.width = c.height = 256;
+            const g = c.getContext('2d');
+            const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+            stops.forEach(s => grad.addColorStop(s[0], s[1]));
+            g.fillStyle = grad;
+            g.fillRect(0, 0, 256, 256);
+            return new THREE.CanvasTexture(c);
+        }
+
+        function buildFloor(groundY) {
+            const floor = new THREE.Mesh(
+                new THREE.CircleGeometry(2.6, 48),
+                new THREE.MeshBasicMaterial({
+                    map: makeFadeTexture(0, 0, [
+                        [0.0, 'rgba(70,74,112,0.85)'],
+                        [0.55, 'rgba(52,56,88,0.55)'],
+                        [1.0, 'rgba(30,32,54,0)']
+                    ]),
+                    transparent: true,
+                    depthWrite: false
+                })
+            );
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.y = groundY + 0.001;
+            floor.renderOrder = -2;
+            scene.add(floor);
+
+            // 발밑 그림자. 이게 있어야 바닥에 닿아 있는 것처럼 보인다.
+            const shadow = new THREE.Mesh(
+                new THREE.CircleGeometry(0.34, 32),
+                new THREE.MeshBasicMaterial({
+                    map: makeFadeTexture(0, 0, [
+                        [0.0, 'rgba(0,0,0,0.5)'],
+                        [0.6, 'rgba(0,0,0,0.22)'],
+                        [1.0, 'rgba(0,0,0,0)']
+                    ]),
+                    transparent: true,
+                    depthWrite: false
+                })
+            );
+            shadow.rotation.x = -Math.PI / 2;
+            shadow.position.y = groundY + 0.004;
+            shadow.renderOrder = -1;
+            scene.add(shadow);
+
+            return shadow;
+        }
+
+        // 바닥 — 이게 없으면 걸어도 제자리처럼 보인다
+        const floorGrid = new THREE.GridHelper(
+            6, 24, 0x3a3d5c, 0x2a2d44
+        );
+        floorGrid.material.transparent = true;
+        floorGrid.material.opacity = 0.45;
+        floorGrid.position.y = -0.2;
+        scene.add(floorGrid);
+
+        const footShadow = buildFloor(-0.2);
+
+
+        // ============================================================
+        // 시점
+        //
+        // 카메라는 원래 다이아를 따라다니기만 했다. 보고 싶은 각도로
+        // 돌려 볼 수가 없었다.
+        //
+        // 아바타 위에서 끌면 만지는 것이고, 빈 곳에서 끌면 시점을 돌린다.
+        // 한 번이라도 사람이 시점을 잡으면 자동 따라가기는 물러난다.
+        // 마음대로 돌려 놓은 것을 카메라가 계속 되돌리면 싸우는 꼴이 된다.
+        // ============================================================
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 1.05 + VIEW_LIFT, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 0.5;
+        controls.maxDistance = 6;
+        controls.enablePan = false;
+        controls.update();
+
+        // 사람이 시점을 잡았는가
+        let camFree = false;
+
+        controls.addEventListener('start', () => camFree = true);
+
+        function resetCamera() {
+            camFree = false;
+            controls.target.set(0, 1.05 + VIEW_LIFT, 0);
+            camera.position.set(0, 1.15 + VIEW_LIFT, 1.65);
+            controls.update();
+        }
+
+
+        // ============================================================
+        // 상태 변수
+        // ============================================================
+
+        let currentVRM = null;
+
+        let isSleeping = true;
+
+        let talkTimer = null;
+        let sleepTimer = null;
+        let bubbleHideTimer = null;
+
+        let isWaitingForAI = false;
+
+        const clock = new THREE.Clock();
+
+
+        // ============================================================
+        // 눈 깜빡임
+        // ============================================================
+
+        let blinkTimer = 0;
+
+        let blinkInterval =
+            3 + Math.random() * 4;
+
+        let isBlinking = false;
+
+        let blinkProgress = 0;
+
+
+        // ============================================================
+        // 표정 상태
+        // ============================================================
+
+        let currentExpression = 'neutral';
+
+        let isExpressing = false;
+
+
+        // ============================================================
+        // 립싱크 상태
+        // ============================================================
+
+        let lipSyncQueue = [];
+
+        let lipSyncTimer = null;
+
+        const currentVowelValues = {
+            a: 0,
+            i: 0,
+            u: 0,
+            e: 0,
+            o: 0
+        };
+
+        const targetVowelValues = {
+            a: 0,
+            i: 0,
+            u: 0,
+            e: 0,
+            o: 0
+        };
+
+
+        // ============================================================
+        // VRM 로딩
+        // ============================================================
+
+        function loadAvatar(url) {
+    const loader = new THREE.GLTFLoader();
+    loader.crossOrigin = 'anonymous';
+
+    loader.load(
+        url,
+        (gltf) => {
+            if (THREE.VRMUtils) {
+                THREE.VRMUtils.removeUnnecessaryJoints(gltf.scene);
+            }
+
+            THREE.VRM.from(gltf).then((vrm) => {
+                scene.add(vrm.scene);
+                currentVRM = vrm;
+
+                detectSurprisedBlendShape(gltf);
+
+                vrm.scene.rotation.y = Math.PI;
+                vrm.scene.position.y = -0.2;
+
+                resetToAttentionPose();
+                setEyeState(true);
+
+                // 배경은 모델과 상관없이 깔린다. 기다릴 것 없이 따로 부른다.
+                loadBackground();
+
+                // 목소리 설정도 미리 받아 둔다
+                loadVoice();
+
+                // 개체를 받아 표정·동작 정의를 넘겨받는다
+                loadEntity().then(() => {
+                    // 몸은 표현용에서 가져와 겹친다.
+                    // 옷 입은 모델은 옷 아래 몸이 지워져 있어 옷을 당기면 비친다.
+                    // 테스트 페이지에서 확인한 뒤 개체의 layered 를 켜면 쓰인다
+                    const bodyUrl = ENTITY && ENTITY.model
+                        && ENTITY.model.layered
+                        && ENTITY.model.vrm_body;
+
+                    return (bodyUrl ? loadBody(bodyUrl) : Promise.resolve())
+                        .then(() => {
+                            alignBody();
+                            hideDressedBody();
+                        });
+
+                }).then(() => {
+                    cacheBones();
+                    splitParts();
+                    buildMorphs();
+                    buildHitboxes();
+                    setTool(null);
+                    playMotion('idle');
+
+                    // 사이와 기분을 그린다.
+                    // 잠긴 도구를 표시하는 데도 지금 친밀도가 필요하다.
+                    buildAffinityMarks();
+                    buildMoodBars();
+                    buildRps();
+                    setMood(currentExpression);
+                    refreshRelationship();
+                });
+
+                // 아바타를 다 불러왔으니 잠 표시(💤)도 같이 켠다.
+                document.getElementById('zzz-indicator').style.display = 'block';
+
+                console.log("VRM 모델 로드 성공!");
+            }).catch((error) => {
+                console.error("VRM 변환 오류:", error);
+            });
+        },
+        undefined,
+        (error) => {
+            console.error("VRM 로드 에러:", error);
+        }
+    );
+}
+
+
+        // ============================================================
+        // 기본 자세
+        // ============================================================
+
+        function resetToAttentionPose() {
+
+            if (
+                !currentVRM ||
+                !currentVRM.humanoid
+            ) {
+                return;
+            }
+
+            const humanoid =
+                currentVRM.humanoid;
+
+            try {
+
+                const leftArm =
+                    humanoid.getBoneNode(
+                        'leftUpperArm'
+                    );
+
+                const rightArm =
+                    humanoid.getBoneNode(
+                        'rightUpperArm'
+                    );
+
+                if (leftArm) {
+                    leftArm.rotation.z = 1.2;
+                }
+
+                if (rightArm) {
+                    rightArm.rotation.z = -1.2;
+                }
+
+            } catch (e) {
+
+                console.warn(
+                    "자세 설정 실패:",
+                    e
+                );
+
+            }
+        }
+
+
+        // ============================================================
+        // 아바타 개체
+        //
+        // 표정 수치와 동작을 이 파일이 들고 있지 않는다.
+        // 서버의 /api/avatar 가 내려준 정의를 그대로 쓴다.
+        // (테스트 화면 /test 와 완전히 같은 정의를 공유한다)
+        // ============================================================
+
+        let ENTITY = null;
+        let ENTITY_SHAPES = [];
+
+        const FALLBACK_SHAPES = {
+            joy: { joy: 0.45 },
+            fun: { fun: 0.8 },
+            angry: { angry: 0.8 },
+            sorrow: { sorrow: 0.8 },
+            neutral: {}
+        };
+
+        async function loadEntity() {
+            try {
+                const res = await fetch('/api/avatar');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                ENTITY = await res.json();
+
+                const set = {};
+                ENTITY.expressions.forEach(e => {
+                    Object.keys(e.blendshapes || {}).forEach(n => set[n] = 1);
+                    Object.keys(e.fallback_blendshapes || {}).forEach(n => set[n] = 1);
+                });
+                ENTITY_SHAPES = Object.keys(set);
+
+                cacheBones();
+                console.log('[diamondAI] 개체 로드: 표정 '
+                    + ENTITY.expressions.length + '종, 동작 '
+                    + ENTITY.motions.length + '종');
+            } catch (e) {
+                console.warn('[diamondAI] 개체를 불러오지 못해 기본값으로 동작합니다.', e);
+            }
+        }
+
+
+        // ------------------------------------------------------------
+        // 배경
+        //
+        // static/background/ 에 이미지를 넣어 두면 아바타 뒤에 깔린다.
+        // 파일 이름을 이 파일에 적지 않는다 — 서버가 폴더를 훑어 알려주므로,
+        // 이미지를 바꿔 넣고 새로 고치기만 하면 된다.
+        //
+        // 3D 는 캔버스에 그리고 배경은 CSS 로 깐다. scene.background 로 넣으면
+        // 창 비율에 따라 그림이 늘어나는데, CSS 는 잘라 넣어 주기 때문이다.
+        // ------------------------------------------------------------
+
+        const backgrounds = { list: [], at: 0 };
+
+        function paintBackground(img, fit, dim) {
+            const box = document.getElementById('avatar-container');
+            if (!box) return;
+
+            if (!img) {
+                box.style.backgroundImage = '';
+                return;
+            }
+
+            const veil = Math.max(0, Math.min(1, dim || 0));
+            const shade = 'linear-gradient(rgba(0,0,0,' + veil + '), '
+                + 'rgba(0,0,0,' + veil + '))';
+
+            box.style.backgroundImage = shade + ', url("' + img.url + '")';
+            box.style.backgroundSize = 'auto, ' + (fit || 'cover');
+            box.style.backgroundPosition = 'center, center';
+            box.style.backgroundRepeat = 'no-repeat, no-repeat';
+        }
+
+        async function loadBackground() {
+            try {
+                const res = await fetch('/api/background');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+
+                const d = await res.json();
+                backgrounds.list = d.images || [];
+                backgrounds.fit = d.fit;
+                backgrounds.dim = d.dim;
+
+                if (!d.current) {
+                    console.log('[diamondAI] ' + d.folder
+                        + ' 에 배경 이미지가 없습니다. 넣으면 바로 깔립니다.');
+                    return;
+                }
+
+                backgrounds.at = backgrounds.list
+                    .findIndex(i => i.url === d.current.url);
+                if (backgrounds.at < 0) backgrounds.at = 0;
+
+                paintBackground(d.current, d.fit, d.dim);
+                console.log('[diamondAI] 배경: ' + d.current.name
+                    + ' (총 ' + backgrounds.list.length + '장)');
+
+            } catch (e) {
+                console.warn('[diamondAI] 배경을 불러오지 못했습니다.', e);
+            }
+        }
+
+        // 여러 장 넣었을 때 다음 장으로 넘긴다.
+        function nextBackground() {
+            if (backgrounds.list.length < 2) return null;
+            backgrounds.at = (backgrounds.at + 1) % backgrounds.list.length;
+            const img = backgrounds.list[backgrounds.at];
+            paintBackground(img, backgrounds.fit, backgrounds.dim);
+            return img;
+        }
+
+        // ------------------------------------------------------------
+        // 모프 타깃을 직접 건드리기
+        //
+        // VRM 이 내주는 표정 그룹은 14개뿐인데 얼굴 메시에는 57개가 있다.
+        // 남은 것들은 눈썹·눈·입을 따로 움직이는 조각이라, 직접 쓰면
+        // 그룹만으로는 못 만드는 얼굴을 만들 수 있다.
+        // (눈 하이라이트를 지우는 것 같은)
+        // ------------------------------------------------------------
+
+        const morphSlots = {};      // 이름 -> [{mesh, index}, ...]
+
+        function buildMorphs() {
+            Object.keys(morphSlots).forEach(k => delete morphSlots[k]);
+            if (!currentVRM) return;
+
+            currentVRM.scene.traverse(o => {
+                if (!o.morphTargetDictionary || !o.morphTargetInfluences) return;
+                Object.keys(o.morphTargetDictionary).forEach(name => {
+                    (morphSlots[name] = morphSlots[name] || []).push({
+                        mesh: o,
+                        index: o.morphTargetDictionary[name]
+                    });
+                });
+            });
+
+            console.log('[diamondAI] 모프 타깃 '
+                + Object.keys(morphSlots).length + '개');
+        }
+
+        function setMorph(name, value) {
+            const slots = morphSlots[name];
+            if (!slots) return false;
+            slots.forEach(s => s.mesh.morphTargetInfluences[s.index] = value);
+            return true;
+        }
+
+        function clearMorphs() {
+            // 표정이 쓰는 것만 되돌린다. 입모양(립싱크)까지 지우면 안 된다.
+            ((ENTITY && ENTITY.expressions) || []).forEach(e => {
+                Object.keys(e.morphs || {}).forEach(n => setMorph(n, 0));
+            });
+        }
+
+        function entityMorphsFor(key) {
+            if (!ENTITY) return null;
+            const e = ENTITY.expressions.find(x => x.key === key);
+            return (e && e.morphs) || null;
+        }
+
+
+        function entityShapesFor(key) {
+            if (!ENTITY) return FALLBACK_SHAPES[key] || null;
+            const e = ENTITY.expressions.find(x => x.key === key);
+            if (!e) return FALLBACK_SHAPES[key] || null;
+            if (e.auto_detect) {
+                if (surprisedBlendShapeName) {
+                    const o = {};
+                    o[surprisedBlendShapeName] = e.auto_weight;
+                    return o;
+                }
+                return e.fallback_blendshapes || {};
+            }
+            return e.blendshapes || {};
+        }
+
+
+        // ============================================================
+        // 동작 재생기
+        //
+        // 클립은 절대 자세로 적혀 있고,
+        // 클립이 언급하지 않은 본은 base_pose 를 쓴다.
+        // ============================================================
+
+        const MOTION_BONES = [
+            'hips', 'spine', 'chest', 'upperChest', 'neck', 'head',
+            'leftShoulder', 'leftUpperArm', 'leftLowerArm', 'leftHand',
+            'rightShoulder', 'rightUpperArm', 'rightLowerArm', 'rightHand',
+            'leftUpperLeg', 'leftLowerLeg', 'leftFoot',
+            'rightUpperLeg', 'rightLowerLeg', 'rightFoot'
+        ];
+
+        // 손가락도 자세를 받아야 한다.
+        // 여기 없으면 개체가 정한 손 모양이 화면에 닿지 못해,
+        // 손이 T포즈 그대로 판자처럼 쫙 펴진 채로 남는다.
+        ['left', 'right'].forEach(side => {
+            ['Thumb', 'Index', 'Middle', 'Ring', 'Little'].forEach(finger => {
+                ['Proximal', 'Intermediate', 'Distal'].forEach(joint => {
+                    MOTION_BONES.push(side + finger + joint);
+                });
+            });
+        });
+
+        let boneNodes = {};
+        let boneNodesBody = {};   // 겹쳐 놓은 몸(표현용)의 같은 뼈
+        const DEG = Math.PI / 180;
+
+        const EASE = {
+            linear: u => u,
+            easeIn: u => u * u,
+            easeOut: u => 1 - (1 - u) * (1 - u),
+            easeInOut: u => u * u * (3 - 2 * u)
+        };
+
+        const player = {
+            motion: null, time: 0, done: true,
+            from: null, blend: 1, blendDur: 0.22
+        };
+
+        // 동작이 정한 머리 각도. 숨쉬기 흔들림은 이 값 '위에' 얹는다.
+        // 덮어쓰면 끄덕임 같은 머리 동작이 화면에서 지워진다.
+        let poseHeadX = 0;
+
+        function cacheBones() {
+            boneNodes = {};
+            boneNodesBody = {};
+            if (!currentVRM || !currentVRM.humanoid) return;
+            MOTION_BONES.forEach(n => {
+                let node = null;
+                try { node = currentVRM.humanoid.getBoneNode(n); } catch (e) {}
+                if (node) boneNodes[n] = node;
+
+                // 겹쳐 놓은 몸에도 같은 자세를 준다. 뼈대가 같아서 그대로 먹는다.
+                if (bodyVRM && bodyVRM.humanoid) {
+                    let b = null;
+                    try { b = bodyVRM.humanoid.getBoneNode(n); } catch (e) {}
+                    if (b) boneNodesBody[n] = b;
+                }
+            });
+        }
+
+        function expressionByKey(key) {
+            return ((ENTITY && ENTITY.expressions) || [])
+                .find(e => e.key === key) || null;
+        }
+
+        function motionByKey(k) {
+            if (!ENTITY) return null;
+            return ENTITY.motions.find(m => m.key === k) || null;
+        }
+
+        function basePose() {
+            return (ENTITY && ENTITY.base_pose) ? ENTITY.base_pose : {};
+        }
+
+        function samplePose(m, t) {
+            const base = basePose();
+            const pose = {};
+            Object.keys(base).forEach(n => pose[n] = base[n].slice());
+
+            const keys = m.keys;
+            let a = keys[0], b = keys[0], u = 0;
+
+            if (t <= keys[0].t) { a = b = keys[0]; }
+            else if (t >= keys[keys.length - 1].t) { a = b = keys[keys.length - 1]; }
+            else {
+                for (let i = 0; i < keys.length - 1; i++) {
+                    if (t >= keys[i].t && t < keys[i + 1].t) {
+                        a = keys[i]; b = keys[i + 1];
+                        u = (t - a.t) / (b.t - a.t);
+                        break;
+                    }
+                }
+            }
+
+            const e = (EASE[m.ease] || EASE.easeInOut)(u);
+
+            m.channels.forEach(n => {
+                const bs = base[n] || [0, 0, 0];
+                const ra = (a.bones && a.bones[n]) || bs;
+                const rb = (b.bones && b.bones[n]) || bs;
+                pose[n] = [
+                    ra[0] + (rb[0] - ra[0]) * e,
+                    ra[1] + (rb[1] - ra[1]) * e,
+                    ra[2] + (rb[2] - ra[2]) * e
+                ];
+            });
+            return pose;
+        }
+
+        function currentPose() {
+            if (!player.motion) {
+                const base = basePose(), p = {};
+                Object.keys(base).forEach(n => p[n] = base[n].slice());
+                return p;
+            }
+            return samplePose(player.motion, player.time);
+        }
+
+        let motionFaceTimer = null;
+
+        function playMotion(key, opts) {
+            // 등을 돌리거나 팔짱을 끼는 일이 없어지는 단계가 있다.
+            key = swapNegative('motions', key);
+
+            const m = motionByKey(key);
+            if (!m) return;
+            player.from = currentPose();
+            player.blend = 0;
+            player.motion = m;
+            player.time = 0;
+            player.done = false;
+
+            // 그 자세로 얼마나 서 있을지. 부르는 쪽이 정할 수 있고,
+            // 없으면 동작이 스스로 들고 있는 값을 쓴다.
+            player.lingerLeft = (opts && typeof opts.linger_ms === 'number')
+                ? opts.linger_ms
+                : (m.linger_ms || 0);
+
+            // 동작이 함께 지을 표정을 정해 뒀다면 그것도 같이 짓는다.
+            // 쑥스러워하기에 놀란 표정이 늘 따라붙는 것이 이 자리다.
+            // (idle·walk 처럼 표정을 정하지 않은 동작은 얼굴을 건드리지 않는다)
+            //
+            // 다만 이미 어울리는 얼굴이면 덮어쓰지 않는다.
+            // 팔짱과 등 돌리기는 삐죽만의 몸짓이 아니다 — 화나서 팔짱을
+            // 끼기도 하고 서운해서 등을 돌리기도 한다. 그때까지 삐죽으로
+            // 바꿔 버리면 화난 말끝에 삐친 얼굴이 나온다.
+            if (motionFaceTimer) {
+                clearTimeout(motionFaceTimer);
+                motionFaceTimer = null;
+            }
+
+            // 말끝에 딸려 나온 몸짓은 얼굴을 건드리지 않는다.
+            //
+            // "조금 쑥스럽네요" 하면서 몸을 움츠릴 수는 있어도, 그때 얼굴까지
+            // 놀란 얼굴로 바뀌지는 않는다. 사람은 쑥스럽다고 말하면서 웃는다.
+            // 얼굴은 그 문장의 감정이 정하고, 몸짓만 얹는 것이 맞다.
+            //
+            // 만져서 놀란 것은 다르다. 그건 정말로 놀란 것이라 얼굴이 같이 간다.
+            const spoken = !!(opts && opts.spoken);
+
+            if (m.expression && !spoken) {
+
+                // 이미 지어진 얼굴이 있으면 동작은 얼굴을 건드리지 않는다.
+                //
+                // 팔짱과 등 돌리기는 삐죽만의 몸짓이 아니다 — 화나서 팔짱을
+                // 끼기도 하고 서운해서 등을 돌리기도 한다. 반대로 삐죽은
+                // 이 두 몸짓과만 같이 나온다. 규칙 하나로 둘 다 된다.
+                // 만졌을 때도 자리가 정한 얼굴이 늘 이긴다.
+                //
+                // 다만 얼굴이 곧 그 동작인 몸짓은 예외다. 쑥스러워하기와
+                // 얼굴 가리기는 놀란 얼굴과 한 몸이라, 웃으면서 하면
+                // 무엇을 하는 건지 알 수 없게 된다.
+                const bare = !currentExpression || currentExpression === 'neutral';
+
+                if (bare || m.expression_force) {
+
+                    // 데려온 얼굴은 데려간 쪽이 치운다.
+                    //
+                    // 예전에는 치우는 데가 없어서, 손을 내린 뒤에도 놀란
+                    // 얼굴이 다음 무언가가 덮을 때까지 그대로 남아 있었다.
+                    // 되돌릴 곳은 평온이 아니라 '동작 전에 짓고 있던 얼굴'
+                    // 이다 — 말하는 중이면 그 말의 얼굴로 돌아가야 한다.
+                    const before = currentExpression || 'neutral';
+
+                    applyExpression(m.expression);
+
+                    const ms = (typeof m.expression_ms === 'number')
+                        ? m.expression_ms
+                        : (m.duration || 0) * 1000;
+
+                    if (ms > 0) {
+                        motionFaceTimer = setTimeout(() => {
+                            motionFaceTimer = null;
+                            // 그 사이 다른 얼굴로 바뀌었으면 건드리지 않는다
+                            if (currentExpression === m.expression) {
+                                applyExpression(before);
+                            }
+                        }, ms);
+                    }
+                }
+            }
+        }
+
+        function updateMotion(dt) {
+            if (!currentVRM) return;
+
+            if (!player.motion) {
+                const b = basePose()['head'];
+                poseHeadX = b ? b[0] * DEG : 0;
+                return;
+            }
+
+            // 마음이 큰 만큼 그 자세로 더 서 있는다.
+            //
+            // 등을 돌린 채 얼마나 있을지는 서운함의 크기가 정한다.
+            // 마음마다 키프레임을 새로 만들 수는 없으니, 가장 오래
+            // 머무는 지점(hold_t)에서 재생을 그만큼 세워 둔다.
+            const holdT = player.motion.hold_t;
+            const linger = player.lingerLeft || 0;
+
+            if (typeof holdT === 'number' && linger > 0
+                && player.time >= holdT) {
+
+                player.lingerLeft = linger - dt * 1000;
+                player.time = holdT;
+
+            } else {
+                player.time += dt;
+            }
+
+            if (player.time >= player.motion.duration) {
+                if (player.motion.loop) {
+                    player.time = player.time % player.motion.duration;
+                } else {
+                    player.time = player.motion.duration;
+                    player.done = true;
+                }
+            }
+            if (player.blend < 1) {
+                player.blend = Math.min(1, player.blend + dt / player.blendDur);
+            }
+
+            let pose = samplePose(player.motion, player.time);
+
+            if (player.from && player.blend < 1) {
+                const w = EASE.easeInOut(player.blend);
+                const base = basePose();
+                const names = {};
+                Object.keys(pose).forEach(n => names[n] = 1);
+                Object.keys(player.from).forEach(n => names[n] = 1);
+                const out = {};
+                Object.keys(names).forEach(n => {
+                    const bs = base[n] || [0, 0, 0];
+                    const f = player.from[n] || bs, tg = pose[n] || bs;
+                    out[n] = [
+                        f[0] + (tg[0] - f[0]) * w,
+                        f[1] + (tg[1] - f[1]) * w,
+                        f[2] + (tg[2] - f[2]) * w
+                    ];
+                });
+                pose = out;
+            }
+
+            const base = basePose();
+            Object.keys(base).forEach(n => { if (!(n in pose)) pose[n] = base[n]; });
+
+            Object.keys(pose).forEach(n => {
+                const r = pose[n];
+                const node = boneNodes[n];
+                if (node) node.rotation.set(r[0] * DEG, r[1] * DEG, r[2] * DEG);
+
+                // 겹쳐 놓은 몸도 같이 움직여야 한다.
+                // 한쪽만 주면 옷과 몸이 따로 논다.
+                const b = boneNodesBody[n];
+                if (b) b.rotation.set(r[0] * DEG, r[1] * DEG, r[2] * DEG);
+            });
+
+            poseHeadX = pose['head'] ? pose['head'][0] * DEG : 0;
+
+            // 몸 전체가 도는 동작(등 돌리기)은 뼈로 못 만든다.
+            // 척추를 150도 비트는 사람은 없다. 그래서 여기서 통째로 돌린다.
+            // 돌았다가 제자리로 돌아오도록 종 모양으로 오르내린다.
+            if (player.motion.turn_yaw) {
+                const u = player.time / player.motion.duration;
+                const bell = Math.sin(Math.min(1, Math.max(0, u)) * Math.PI);
+                roam.yaw = player.motion.turn_yaw * DEG
+                    * EASE.easeInOut(bell);
+            }
+        }
+
+
+        // ============================================================
+        // 돌아다니기
+        // ============================================================
+
+        const roam = {
+            on: false, state: 'idle',
+            x: 0, z: 0, yaw: 0, targetX: 0, targetZ: 0,
+            wait: 0, phase: 0
+        };
+
+        function loco() {
+            return (ENTITY && ENTITY.locomotion) ? ENTITY.locomotion : null;
+        }
+
+        // 0보다 크면 그 시간 동안 이쪽으로 빠르게 돌아선다
+        let faceUrgency = 0;
+
+        // 0보다 크면 그 시간 동안 고개를 돌린 채로 둔다.
+        // 입을 닫았을 때 쓴다 — 안 그러면 돌아서자마자 다시 이쪽을 봐서
+        // 외면한 티가 나지 않는다.
+        let sulkTimer = 0;
+
+        // 돌아다녀도 되는가.
+        //
+        // 대화 중에 혼자 걸어 다니면 이야기하다 말고 떠나는 꼴이 된다.
+        // 그래서 기본은 제자리다. 한동안 조용해서 다이아가 먼저 말을 건
+        // 뒤부터 돌아다니고, 상대가 다시 말을 걸면 멈춘다.
+        let mayRoam = false;
+
+        function faceUser() {
+            // 말을 걸었으면 걷던 것을 멈춘다. 등을 돌린 채 대답하면 어색하다.
+            if (roam.state === 'move') {
+                roam.state = 'idle';
+                roam.wait = 2.5;
+                playMotion('idle');
+            }
+            faceUrgency = 1.4;
+
+            // 이야기가 시작됐으니 다시 조용해질 때까지는 제자리에 있는다.
+            // 다만 같이 걷는 중이라면 발을 묶지 않는다 —
+            // 산책하면서 말도 하는 것이 자연스럽다.
+            if (!walking) mayRoam = false;
+        }
+
+
+        // 같이 걷는 중인가.
+        //
+        // 평소에는 제자리에 서 있다가, "산책하자" 같은 말이 나오면
+        // 발이 풀린다. "그만 걷자" 하면 멈추고 이쪽을 본다.
+        let walking = false;
+
+        function setWalking(on) {
+            if (walking === on) return;
+            walking = on;
+            mayRoam = on;
+
+            if (on) {
+                // 곧바로 걷기 시작한다. 기다릴 이유가 없다.
+                roam.wait = 0;
+                console.log('[diamondAI] 같이 걷기 시작');
+            } else {
+                if (roam.state === 'move') {
+                    roam.state = 'idle';
+                    roam.wait = 2.0;
+                    playMotion('idle');
+                }
+                faceUrgency = 1.4;
+                console.log('[diamondAI] 걷기 멈춤');
+            }
+        }
+
+        function angleDiff(a, b) {
+            let d = (b - a) % (Math.PI * 2);
+            if (d > Math.PI) d -= Math.PI * 2;
+            if (d < -Math.PI) d += Math.PI * 2;
+            return d;
+        }
+
+        function pickRoamTarget() {
+            const L = loco();
+            // 대화 화면은 카메라가 가까우므로 좁게 움직인다
+            const radius = Math.min(L.roam_radius, 0.75);
+            for (let i = 0; i < 12; i++) {
+                const ang = Math.random() * Math.PI * 2;
+                const r = radius * (0.4 + Math.random() * 0.6);
+                const tx = Math.cos(ang) * r, tz = Math.sin(ang) * r * 0.5;
+                if (Math.hypot(tx - roam.x, tz - roam.z) > 0.25) {
+                    roam.targetX = tx; roam.targetZ = tz; return;
+                }
+            }
+            roam.targetX = 0; roam.targetZ = 0;
+        }
+
+        function updateRoam(dt) {
+            const L = loco();
+            if (!currentVRM || !L) return;
+
+            // 자거나 말하는 중에는 돌아다니지 않는다
+            if (isSleeping || lipSyncTimer || isWaitingForAI) {
+                if (roam.state === 'move') {
+                    roam.state = 'idle';
+                    roam.wait = 3;
+                    playMotion('idle');
+                }
+            } else if (roam.state === 'gesture') {
+                if (player.done) {
+                    roam.state = 'idle';
+                    roam.wait = 2 + Math.random() * 4;
+                    playMotion('idle');
+                }
+            } else if (roam.state === 'idle') {
+                roam.wait -= dt;
+
+                // 아직 돌아다닐 때가 아니면 제자리에 둔다.
+                // 개체가 아예 꺼 뒀거나(roam_enabled), 대화 중이면 안 움직인다.
+                if (!mayRoam || !L.roam_enabled) roam.wait = 1.0;
+
+                if (roam.wait <= 0) {
+                    pickRoamTarget();
+                    roam.state = 'move';
+                    playMotion('walk');
+                }
+            } else if (roam.state === 'move') {
+                const dx = roam.targetX - roam.x, dz = roam.targetZ - roam.z;
+                const dist = Math.hypot(dx, dz);
+                if (dist <= L.arrive_dist) {
+                    roam.state = 'idle';
+                    roam.wait = 4 + Math.random() * 6;
+                    playMotion('idle');
+                } else {
+                    const want = Math.atan2(dx, dz);
+                    const diff = angleDiff(roam.yaw, want);
+                    roam.yaw += Math.max(-L.turn_speed * dt,
+                        Math.min(L.turn_speed * dt, diff));
+                    const align = Math.max(0, Math.cos(angleDiff(roam.yaw, want)));
+                    const step = Math.min(L.walk_speed * dt * align, dist);
+                    roam.x += Math.sin(roam.yaw) * step;
+                    roam.z += Math.cos(roam.yaw) * step;
+                    roam.phase += dt / (player.motion ? player.motion.duration : 1);
+                }
+            }
+
+            // 걷는 중이 아니면 늘 이쪽을 향해 돌아선다.
+            // 말을 걸었을 때는 한동안 훨씬 빠르게 돈다. 하던 걸 멈추고
+            // 바로 이쪽을 보는 것이 자연스럽다.
+            // 몸을 돌리는 동작이 재생 중이면 그 동작이 방향을 쥔다.
+            // 여기서 같이 돌리면 서로 밀친다.
+            const turning = player.motion && player.motion.turn_yaw;
+
+            if (roam.state !== 'move' && !turning) {
+                if (sulkTimer > 0) {
+                    // 외면하는 중이다. 이쪽으로 돌리지 않는다.
+                    sulkTimer -= dt;
+                } else {
+                    const sp = L.turn_speed * (faceUrgency > 0 ? 5.0 : 1);
+                    roam.yaw += Math.max(-sp * dt,
+                        Math.min(sp * dt, angleDiff(roam.yaw, 0)));
+                }
+            }
+
+            if (faceUrgency > 0) faceUrgency -= dt;
+
+            const bob = (roam.state === 'move')
+                ? Math.abs(Math.sin(roam.phase * Math.PI * 2)) * L.bob_height : 0;
+
+            currentVRM.scene.position.set(roam.x, L.ground_y + bob, roam.z);
+            currentVRM.scene.rotation.y = Math.PI + roam.yaw;
+
+            if (bodyVRM) {
+                bodyVRM.scene.position.copy(currentVRM.scene.position);
+                bodyVRM.scene.rotation.y = currentVRM.scene.rotation.y;
+            }
+
+            if (floorGrid) floorGrid.position.y = L.ground_y;
+
+            if (footShadow) {
+                footShadow.position.set(roam.x, L.ground_y + 0.004, roam.z);
+                // 걸을 때 살짝 뜨면 그림자도 옅어진다
+                footShadow.material.opacity = 1 - Math.min(0.35, bob * 12);
+            }
+
+            // 사람이 시점을 잡았으면 카메라는 건드리지 않는다.
+            // 돌려 놓은 것을 자동으로 되돌리면 서로 싸운다.
+            if (camFree) {
+                controls.target.lerp(
+                    new THREE.Vector3(roam.x * 0.8, 1.05, roam.z * 0.5),
+                    Math.min(1, dt * 1.2)
+                );
+                return;
+            }
+
+            // 아직 아무도 안 잡았으면 살짝 따라가 화면 밖으로 나가지 않게 한다
+            camera.position.x += (roam.x * 0.55 - camera.position.x) * Math.min(1, dt * 2.5);
+            const back = (roam.state === 'move') ? 0.45 : 0;
+            const wantZ = 1.65 + back;
+            camera.position.z += (wantZ - camera.position.z) * Math.min(1, dt * 1.6);
+            camera.lookAt(roam.x * 0.8, 1.05, roam.z * 0.5);
+            controls.target.set(roam.x * 0.8, 1.05 + VIEW_LIFT, roam.z * 0.5);
+        }
+
+
+        // ============================================================
+        // 서버가 걷어낸 표시를 그 자리에서 되살린다
+        // ============================================================
+
+        let cueTimers = [];
+
+        function playCues(cues, baseFace, replyLen) {
+            cueTimers.forEach(clearTimeout);
+            cueTimers = [];
+            if (!cues || !cues.length || !ENTITY) return;
+
+            const tick = ENTITY.behavior.lipsync_tick_ms || 100;
+            const home = baseFace || 'neutral';
+            const total = (replyLen || 0) * tick;
+
+            // 몸짓이 앞뒤로 붙으면 뭉개진다. 앞 몸짓이 끝날 즈음으로 민다.
+            let freeAt = 0;
+
+            cues.forEach((c, idx) => {
+
+                const at = (c.at || 0) * tick;
+
+                if (c.type === 'expression') {
+
+                    // 이 얼굴을 언제까지 지을지.
+                    //
+                    // 다음 표시가 있으면 거기까지, 없으면 말이 끝날 때까지다.
+                    // 정해 둔 유지 시간보다 짧아지지는 않게 한다.
+                    let until = total - at;
+                    for (let k = idx + 1; k < cues.length; k++) {
+                        if (cues[k].type !== 'expression') continue;
+                        until = (cues[k].at || 0) * tick - at;
+                        break;
+                    }
+
+                    const ms = Math.max(c.hold_ms || 3000, Math.min(until, 8000));
+
+                    cueTimers.push(setTimeout(() => {
+                        applyExpression(c.key);
+
+                        if (window.expressionChangeTimer) {
+                            clearTimeout(window.expressionChangeTimer);
+                        }
+                        window.expressionChangeTimer = setTimeout(() => {
+                            // 평온이 아니라 이 답변의 얼굴로 돌아간다
+                            applyExpression(home);
+                        }, ms);
+                    }, at));
+
+                    return;
+                }
+
+                if (c.type === 'motion' && roam.state !== 'move') {
+
+                    const m = motionByKey(c.key);
+                    const span = ((m ? m.duration : 2.2) * 1000)
+                        + (c.linger_ms || 0);
+
+                    // 앞 몸짓이 아직 도는 중이면 그 뒤로 민다
+                    const when = Math.max(at, freeAt);
+                    freeAt = when + span;
+
+                    cueTimers.push(setTimeout(() => {
+                        roam.state = 'gesture';
+                        playMotion(c.key, {
+                            spoken: true,
+                            linger_ms: c.linger_ms,
+                        });
+
+                        // 세기가 실려 온 몸짓은 얼굴도 같이 짓는다.
+                        // 몸짓과 얼굴이 같이 시작해 같이 끝나야 한다.
+                        if (c.face) {
+                            applyExpression(c.face);
+
+                            if (window.expressionChangeTimer) {
+                                clearTimeout(window.expressionChangeTimer);
+                            }
+                            window.expressionChangeTimer = setTimeout(() => {
+                                applyExpression(home);
+                            }, span);
+                        }
+                    }, when));
+                }
+            });
+        }
+
+
+        // ============================================================
+        // 지금 어떤 사이이고 어떤 기분인지 보여주기
+        //
+        // 단계 경계와 표정 이름은 개체가 가지고 있다.
+        // 여기서는 받아서 그리기만 한다.
+        // ============================================================
+
+        const stageLabelEl = document.getElementById('stage-label');
+        const affinityNumEl = document.getElementById('affinity-num');
+        const affinityFill = document.getElementById('affinity-fill');
+        const affinityKnob = document.getElementById('affinity-knob');
+        const affinityMarks = document.getElementById('affinity-marks');
+        const affinityPop = document.getElementById('affinity-pop');
+        const moodDot = document.getElementById('mood-dot');
+        const moodLabel = document.getElementById('mood-label');
+        const moodBars = document.getElementById('mood-bars');
+
+        // 표정마다 색을 준다. 이름만으로는 한눈에 안 들어온다.
+        const MOOD_COLOR = {
+            neutral: '#8f93b8',
+            joy: '#f0c86a',
+            fun: '#86e08a',
+            sorrow: '#6fa8dc',
+            angry: '#ff7b7b',
+            surprised: '#c58ae0'
+        };
+
+        let affinityShown = null;
+
+        // 상한(330)을 넘어 쌓인 마음. 100점이 모여야 1이 된다.
+        const myDevotion = { level: 0, raw: 0, label: null };
+
+        // 지금 얼마나 상해 있는가.
+        //
+        // 사이(단계)와는 다르다. 사이가 좋아도 방금 심한 말을 들었으면
+        // 상해 있다. 쓰다듬으면 풀리고, 시간이 지나도 저절로 풀린다.
+        const myMood = { level: 0, label: null, expression: null };
+
+        // 연인인가.
+        //
+        // 사이(단계)와 다르다. 사이는 마음이 얼마나 깊은지고,
+        // 이건 그 마음을 서로 말로 확인했는지다.
+        // 연인이 되기 전에는 호감이 광기 앞에서 멈춘다.
+        const myLover = { yes: false, ceiling: null };
+
+        // 지금 단계에 늘 걸려 있는 얼굴
+        function stageMorphs() {
+            const s = stageList().find(x => x.key === myStageKey);
+            return (s && s.morphs) || {};
+        }
+
+        function stageList() {
+            return (ENTITY && ENTITY.relationship && ENTITY.relationship.stages)
+                || [];
+        }
+
+        function curStage() {
+            return stageList().find(x => x.key === myStageKey) || null;
+        }
+
+        // 부정적인 표현이 사라지는 단계에서 무엇으로 바꿔 낼지.
+        //
+        // 얀데레가 그렇다. 화를 참는 게 아니라 화가 날 일이 없어진 것이라
+        // 화난 얼굴을 지우는 대신 웃는 얼굴로 갈아 끼운다.
+        // 눈에는 이미 빛이 없으니(stageMorphs) 웃는 얼굴이 더 서늘하다.
+        function swapNegative(kind, key) {
+            if (!key) return key;
+            const s = curStage();
+            if (!s || !s.no_negative) return key;
+
+            const tbl = (ENTITY.relationship.no_negative || {})[kind] || {};
+            const to = tbl[key];
+            if (!to || to === key) return key;
+
+            console.log('[diamondAI] ' + s.label + ' — ' + kind + ' '
+                + key + ' -> ' + to);
+            return to;
+        }
+
+        function affinityRange() {
+            const st = stageList();
+            if (!st.length) return [-100, 120];
+
+            const lo = st[0].min_affinity;
+            const last = st[st.length - 1].min_affinity;
+
+            // 마지막 단계도 눈금 안에서 자리를 갖도록 여유를 준다.
+            // 친밀도 상한이 열려 있어 지금 값이 더 클 수도 있으므로 그것도 본다.
+            let hi = last + Math.max(20, Math.round((last - lo) * 0.15));
+            if (typeof myAffinity === 'number') {
+                hi = Math.max(hi, myAffinity + 10);
+            }
+            return [lo, hi];
+        }
+
+        function buildAffinityMarks() {
+            const [lo, hi] = affinityRange();
+            affinityMarks.innerHTML = '';
+
+            stageList().forEach(s => {
+                if (s.min_affinity <= lo) return;
+                const i = document.createElement('i');
+                i.style.left = ((s.min_affinity - lo) / (hi - lo) * 100) + '%';
+                i.title = s.label + ' ' + s.min_affinity;
+                affinityMarks.appendChild(i);
+            });
+        }
+
+        function setAffinity(value, label) {
+            if (typeof value !== 'number') return;
+
+            const [lo, hi] = affinityRange();
+            const pct = Math.max(0, Math.min(100, (value - lo) / (hi - lo) * 100));
+
+            affinityFill.style.width = pct + '%';
+            affinityKnob.style.left = pct + '%';
+            affinityNumEl.textContent = value;
+
+            // 눈금이 꽉 찬 뒤로도 쌓이는 마음이 있다.
+            // 눈금은 그대로 두고 이름표 옆에 조용히 적는다.
+            if (label) {
+                let t = myDevotion.level > 0
+                    ? label + ' · 순종 ' + myDevotion.level
+                      + (myDevotion.label ? ' (' + myDevotion.label + ')' : '')
+                    : label;
+
+                // 연인이면 그렇게 적는다
+                if (myLover.yes) t += ' · 연인';
+
+                // 연인이 아닌데 천장에 닿았으면 왜 안 오르는지 알려준다
+                else if (myLover.ceiling !== null
+                         && value >= myLover.ceiling) {
+                    t += ' · 여기서 멈춤 (고백이 필요하다)';
+                }
+
+                // 상해 있으면 그것도 적는다. 사이와 기분은 다른 것이다.
+                if (myMood.level > 0 && myMood.label) {
+                    t += ' · 기분 ' + myMood.label;
+                }
+
+                stageLabelEl.textContent = t;
+            }
+
+            if (affinityShown !== null && value !== affinityShown) {
+                showAffinityPop(value - affinityShown);
+            }
+            affinityShown = value;
+
+            updateTouchZones();
+        }
+
+        function showAffinityPop(delta) {
+            if (!delta) return;
+            affinityPop.textContent = (delta > 0 ? '+' : '') + delta;
+            affinityPop.className = delta > 0 ? 'up' : 'down';
+            // 애니메이션을 다시 태우려면 한 번 지웠다 붙여야 한다
+            void affinityPop.offsetWidth;
+            affinityPop.classList.add('show');
+            setTimeout(() => affinityPop.classList.remove('show'), 1400);
+        }
+
+        function buildMoodBars() {
+            moodBars.innerHTML = '';
+            const list = (ENTITY && ENTITY.expressions) || [];
+            // 윙크나 눈 감기는 기분이 아니라 눈 상태다. 여기 섞으면 헷갈린다.
+            list.filter(e => e.key !== 'neutral' && e.is_reply_emotion !== false)
+                .forEach(e => {
+                const m = document.createElement('div');
+                m.className = 'm';
+                m.dataset.key = e.key;
+                m.title = e.label;
+                moodBars.appendChild(m);
+            });
+        }
+
+        function setMood(key) {
+            const list = (ENTITY && ENTITY.expressions) || [];
+            const found = list.find(e => e.key === key);
+            const color = MOOD_COLOR[key] || '#8f93b8';
+
+            moodDot.style.background = color;
+            moodLabel.textContent = found ? found.label : (key || '평온');
+
+            moodBars.querySelectorAll('.m').forEach(m => {
+                const on = m.dataset.key === key;
+                m.style.background = on ? (MOOD_COLOR[m.dataset.key] || '#8f93b8')
+                                        : '#262a4a';
+                m.style.opacity = on ? '1' : '0.5';
+            });
+        }
+
+        // ------------------------------------------------------------
+        // 대답하지 않을 때
+        //
+        // 사이가 바닥까지 떨어지면 다이아는 입을 닫는다.
+        // 서버가 모델을 아예 부르지 않으므로 할 말 자체가 없다.
+        // 화면은 그걸 '고장'이 아니라 '침묵'으로 보여줘야 한다.
+        // ------------------------------------------------------------
+
+        function silenceCfg() {
+            return (ENTITY && ENTITY.relationship
+                && ENTITY.relationship.silence) || {};
+        }
+
+        function showSilence(expression) {
+            const conf = silenceCfg();
+
+            // 대화창에는 아무것도 남기지 않는다.
+            // 말풍선의 점과 돌아선 몸이면 충분하다 —
+            // '(대답이 없다)'라고 굳이 적으면 설명하는 꼴이 된다.
+            applyExpression(expression || 'angry');
+
+            // 말풍선에는 점만 잠깐 띄운다. 립싱크는 하지 않는다.
+            speechBubble.innerText = conf.note || '…';
+            speechBubble.style.display = 'block';
+
+            if (bubbleHideTimer) clearTimeout(bubbleHideTimer);
+            bubbleHideTimer = setTimeout(() => {
+                speechBubble.style.display = 'none';
+            }, 1800);
+
+            // 고개를 돌려 버린다. 잠시 그대로 둔다.
+            roam.state = 'idle';
+            roam.wait = 5;
+            faceUrgency = 0;
+            sulkTimer = 5;
+            roam.yaw = 0.55;
+            playMotion('idle');
+
+            startInactivityTimers();
+        }
+
+
+        // 지금 호감도로 어디를 만질 수 있는지.
+        // 사이가 깊어질수록 열리는 곳이 늘어난다.
+        function updateTouchZones() {
+            const box = document.getElementById('touch-zones');
+            if (!box || !ENTITY || !ENTITY.touch) return;
+
+            const zones = ENTITY.touch.zones || [];
+            const aff = (typeof myAffinity === 'number') ? myAffinity : 0;
+
+            // 이름을 내지 않기로 한 자리는 목록에서 뺀다
+            box.innerHTML = zones.filter(z => !z.hidden && z.label).map(z => {
+                const open = (z.allow_from === null || z.allow_from === undefined)
+                    ? true : aff >= z.allow_from;
+                return open
+                    ? '<b>' + z.label + '</b>'
+                    : '<i>' + z.label + '</i>';
+            }).join(' · ');
+        }
+
+        function refreshRelationship() {
+            fetch('/api/relationship')
+                .then(r => r.json())
+                .then(d => {
+                    if (typeof d.affinity !== 'number') return;
+                    myAffinity = d.affinity;
+                    myStageKey = d.stage || null;
+
+                    myLover.yes = !!d.lover;
+                    if (typeof d.ceiling === 'number') {
+                        myLover.ceiling = d.ceiling;
+                    }
+
+                    if (typeof d.mood === 'number') {
+                        myMood.level = d.mood;
+                        myMood.label = d.mood_label || null;
+                        myMood.expression = d.mood_expression || null;
+                    }
+
+                    if (typeof d.devotion === 'number') {
+                        const grew = d.devotion > myDevotion.level;
+                        myDevotion.level = d.devotion;
+                        myDevotion.raw = d.devotion_raw || 0;
+                        myDevotion.label = d.devotion_label || null;
+                        if (grew) {
+                            console.log('[diamondAI] 순종 ' + d.devotion
+                                + ' · ' + (d.devotion_label || ''));
+                        }
+                    }
+                    buildAffinityMarks();
+                    setAffinity(d.affinity, d.label);
+                    buildToolMenu();
+                    updateTouchZones();
+                })
+                .catch(() => {});
+        }
+
+
+        // ============================================================
+        // 가위바위보
+        //
+        // 무엇을 낼지와 뭐라고 할지는 개체가 정한다.
+        // 여기서는 사람이 낸 것을 보내고, 돌아온 대로 보여준다.
+        //
+        // 동작은 1.35초에 자기 것을 낸다. 결과를 그보다 먼저 말해 버리면
+        // 손을 내기도 전에 답이 나와 김이 샌다. 그래서 기다렸다 말한다.
+        // ============================================================
+
+        const RPS_REVEAL_MS = 1450;
+
+        const rpsOpen = document.getElementById('rps-open');
+        const rpsHands = document.getElementById('rps-hands');
+
+        let rpsBusy = false;
+
+        function buildRps() {
+            const hands = (ENTITY && ENTITY.game && ENTITY.game.rps
+                && ENTITY.game.rps.hands) || [];
+
+            rpsHands.innerHTML = '';
+
+            hands.forEach(h => {
+                const b = document.createElement('button');
+                b.innerHTML = h.icon + '<b>' + h.label + '</b>';
+                b.title = h.label;
+                b.onclick = () => playRps(h.key);
+                rpsHands.appendChild(b);
+            });
+        }
+
+        function setRpsEnabled(on) {
+            rpsHands.querySelectorAll('button')
+                .forEach(b => b.disabled = !on);
+        }
+
+        async function playRps(key) {
+            if (rpsBusy) return;
+            rpsBusy = true;
+            setRpsEnabled(false);
+
+            if (isSleeping) wakeUp();
+
+            // 판을 벌이는 동안에는 돌아다니지 않는다
+            roam.state = 'gesture';
+            faceUser();
+
+            try {
+                const res = await fetch('/api/rps', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hand: key })
+                });
+
+                const data = await res.json();
+                if (!data.ok) throw new Error(data.error || '실패');
+
+                // 먼저 손을 낸다
+                if (data.motion) playMotion(data.motion);
+
+                // 낸 뒤에 말한다
+                setTimeout(() => {
+                    showReply(data.reply, data.expression || 'neutral', null);
+
+                    if (typeof data.affinity === 'number') {
+                        myAffinity = data.affinity;
+                        setAffinity(data.affinity, data.stage_label);
+                        buildToolMenu();
+                    }
+
+                    rpsBusy = false;
+                    setRpsEnabled(true);
+
+                }, RPS_REVEAL_MS);
+
+            } catch (e) {
+                console.warn('[diamondAI] 가위바위보 실패:', e);
+                rpsBusy = false;
+                setRpsEnabled(true);
+            }
+        }
+
+        rpsOpen.onclick = () => {
+            const on = !rpsHands.classList.contains('open');
+            rpsHands.classList.toggle('open', on);
+            rpsOpen.classList.toggle('on', on);
+        };
+
+
+        // ------------------------------------------------------------
+        // "가위바위보 하자" 는 모델에게 묻지 않는다
+        //
+        // 모델을 거치면 답이 길어지는데 립싱크가 한 글자에 0.2초라,
+        // 정작 손은 한참 뒤에야 낸다. 놀이의 박자가 깨진다.
+        // 그래서 이 말은 화면이 알아채고 바로 단추를 가리킨다.
+        // ------------------------------------------------------------
+
+        function rpsCfg() {
+            return (ENTITY && ENTITY.game && ENTITY.game.rps) || {};
+        }
+
+        function isPolite() {
+            const stages = stageList();
+            const s = stages.find(x => x.key === myStageKey);
+            // 아직 모르면 정중한 쪽으로 둔다. 함부로 반말하는 것보다 낫다.
+            return !s || String(s.speech || '').startsWith('존댓말');
+        }
+
+        function handleRpsCommand(text) {
+            const list = rpsCfg().triggers || [];
+            if (!list.length) return false;
+
+            const flat = text.replace(/\s+/g, '').toLowerCase();
+            const hit = list.some(w =>
+                flat.includes(String(w).replace(/\s+/g, '').toLowerCase()));
+
+            if (!hit) return false;
+
+            appendMessage('user', text);
+
+            if (isSleeping) wakeUp();
+            faceUser();
+
+            // 단추를 펼치고 잠깐 눈에 띄게 한다
+            rpsHands.classList.add('open');
+            rpsOpen.classList.add('on', 'call');
+            setTimeout(() => rpsOpen.classList.remove('call'), 3400);
+
+            const pool = (rpsCfg().guide || {})[isPolite() ? 'polite' : 'casual']
+                || [];
+
+            if (pool.length) {
+                showReply(pool[Math.floor(Math.random() * pool.length)],
+                          'fun', null);
+            }
+
+            return true;
+        }
+
+
+        // ============================================================
+        // 말풍선을 머리 옆에 붙여 두기
+        //
+        // 말풍선은 화면 한 자리에 고정돼 있었다. 다이아가 걸어가거나
+        // 시점을 돌리면 엉뚱한 데서 말이 나온다.
+        // 머리의 3차원 위치를 화면 좌표로 옮겨 매 프레임 따라가게 한다.
+        // ============================================================
+
+        const _bubbleAt = new THREE.Vector3();
+
+        // 화면에 실제로 그린 자리. 목표를 향해 천천히 따라간다.
+        //
+        // 머리를 1:1 로 따라가면 숨쉬기와 끄덕임의 잔떨림까지 그대로 옮겨
+        // 글자가 계속 흔들린다. 읽기 힘들다.
+        // 그래서 작은 흔들림은 무시하고, 큰 움직임만 부드럽게 좇는다.
+        let _bubbleX = null;
+        let _bubbleY = null;
+
+        const BUBBLE_DEADZONE = 6;      // 이보다 적게 움직이면 가만히 둔다(px)
+        const BUBBLE_FOLLOW = 6;        // 클수록 빨리 따라간다
+
+        function updateBubblePos(dt) {
+            if (!currentVRM) return;
+
+            // 말풍선 변수는 이 파일 뒤쪽에서 만들어진다.
+            // 여기서 직접 찾아 쓰면 선언 순서에 기대지 않아도 된다.
+            const speechBubble = document.getElementById('speech-bubble');
+            if (!speechBubble || speechBubble.style.display === 'none') return;
+
+            let head = null;
+            try {
+                head = currentVRM.humanoid.getBoneNode('head');
+            } catch (e) {}
+            if (!head) return;
+
+            head.getWorldPosition(_bubbleAt);
+            _bubbleAt.y += 0.06;                 // 눈높이보다 살짝 위
+
+            _bubbleAt.project(camera);
+
+            // 카메라 뒤로 돌아가면 화면에 그리지 않는다
+            if (_bubbleAt.z > 1) {
+                speechBubble.style.opacity = '0';
+                return;
+            }
+            speechBubble.style.opacity = '1';
+
+            const w = canvas.clientWidth;
+            const h = canvas.clientHeight;
+
+            let x = (_bubbleAt.x * 0.5 + 0.5) * w;
+            let y = (-_bubbleAt.y * 0.5 + 0.5) * h;
+
+            // 다이아 기준 왼쪽 = 화면에서는 오른쪽이다. 이쪽을 보고 서 있어서다.
+            // 말풍선의 왼쪽 끝이 얼굴 옆에 오도록 CSS 에서
+            // translate(0, -50%) 를 걸어 뒀고, 여기서는 사이를 조금 띄운다.
+            const gap = 170;
+            x += gap;
+
+            // 화면 밖으로 나가지 않게 잡아 둔다
+            const bw = speechBubble.offsetWidth || 200;
+            const bh = speechBubble.offsetHeight || 60;
+            const pad = 10;
+
+            x = Math.max(pad, Math.min(w - bw - pad, x));
+            y = Math.max(bh / 2 + pad, Math.min(h - bh / 2 - pad, y));
+
+            // 처음이면 그 자리에 바로 놓는다
+            if (_bubbleX === null) {
+                _bubbleX = x;
+                _bubbleY = y;
+            } else {
+                const dx = x - _bubbleX;
+                const dy = y - _bubbleY;
+
+                // 잔떨림은 무시한다. 이만큼 넘게 움직였을 때만 따라간다.
+                if (Math.hypot(dx, dy) > BUBBLE_DEADZONE) {
+                    const k = Math.min(1, (dt || 0.016) * BUBBLE_FOLLOW);
+                    _bubbleX += dx * k;
+                    _bubbleY += dy * k;
+                }
+            }
+
+            speechBubble.style.left = Math.round(_bubbleX) + 'px';
+            speechBubble.style.top = Math.round(_bubbleY) + 'px';
+        }
+
+
+        // ============================================================
+        // 두 벌을 겹쳐 쓴다
+        //
+        // 옷 입은 모델(avatar.vrm)은 옷 아래 몸이 지워져 있다.
+        // 몸이 7949 삼각형인데 벗은 모델(표현용.vrm)은 10022 다.
+        // 그래서 옷을 당기면 그 아래가 비어 구멍이 보인다.
+        //
+        // 몸은 표현용에서, 옷·머리카락·기본 얼굴은 avatar 에서 가져와 겹친다.
+        // 뼈대가 같으므로(휴머노이드 54개) 같은 자세를 둘 다에 그대로 준다.
+        //
+        // 얼굴은 두 벌 다 있다. 평소에는 기본 얼굴을 보여주고,
+        // 절정 표정을 지을 때만 표현용 얼굴로 바꿔 낀다 —
+        // 같은 이름의 모프인데 표현용 쪽이 더 과장돼 있기 때문이다.
+        // ============================================================
+
+        let bodyVRM = null;             // 표현용
+        let baseFaces = [];             // avatar 의 얼굴 메시들
+        let specialFaces = [];          // 표현용의 얼굴 메시들
+        let showingSpecial = false;
+
+        function isFaceMesh(o) {
+            let p = o;
+            while (p) {
+                if (p.name === 'Face') return true;
+                p = p.parent;
+            }
+            return false;
+        }
+
+
+        // 두 모델의 키를 맞춘다.
+        //
+        // 표현용은 신발을 지우면서 골격이 통째로 2.27cm 내려갔다. 비율은
+        // 같은데 전체가 낮다. 그대로 겹치면 옷과 머리카락은 제자리인데
+        // 몸만 가라앉아, 얼굴이 목 위로 떠 보인다.
+        //
+        // 숫자를 적어 두지 않는다. 파일을 다시 내보내면 또 달라지므로,
+        // 두 모델의 엉덩이 본이 실제로 어디 있는지 재서 그 차이만큼 옮긴다.
+        //
+        // 걸어 다니면 옷 쪽이 움직이므로, 그 차이를 기억해 두고
+        // 매 프레임 몸을 그만큼 떨어뜨려 따라붙인다.
+        const bodyLift = new THREE.Vector3();
+
+        function alignBody() {
+            if (!currentVRM || !bodyVRM) return;
+
+            const a = currentVRM.humanoid && currentVRM.humanoid.getBoneNode('hips');
+            const b = bodyVRM.humanoid && bodyVRM.humanoid.getBoneNode('hips');
+            if (!a || !b) return;
+
+            currentVRM.scene.updateWorldMatrix(true, true);
+            bodyVRM.scene.updateWorldMatrix(true, true);
+
+            const pa = new THREE.Vector3().setFromMatrixPosition(a.matrixWorld);
+            const pb = new THREE.Vector3().setFromMatrixPosition(b.matrixWorld);
+
+            // 지금 몸이 어디 있는지에서 출발해 차이를 더한다
+            bodyLift.copy(bodyVRM.scene.position).add(pa.sub(pb))
+                .sub(currentVRM.scene.position);
+
+            followBody();
+
+            console.log('[diamondAI] 몸 높이 보정 '
+                + (bodyLift.y * 100).toFixed(2) + 'cm');
+        }
+
+        // 옷이 걸어가면 몸도 같이 간다
+        function followBody() {
+            if (!currentVRM || !bodyVRM) return;
+            bodyVRM.scene.position.copy(currentVRM.scene.position).add(bodyLift);
+        }
+
+        function loadBody(url) {
+            return new Promise(resolve => {
+                new THREE.GLTFLoader().load(url, (gltf) => {
+                    if (THREE.VRMUtils) {
+                        THREE.VRMUtils.removeUnnecessaryJoints(gltf.scene);
+                    }
+                    THREE.VRM.from(gltf).then(vrm => {
+                        bodyVRM = vrm;
+                        vrm.scene.rotation.y = Math.PI;
+                        scene.add(vrm.scene);
+
+                        // 표현용에서 쓰는 것은 몸뿐이다.
+                        // 얼굴은 절정 표정을 지을 때만 꺼내 쓰고,
+                        // 신발은 avatar 쪽 것을 쓰므로 여기서는 감춘다.
+                        specialFaces = [];
+                        vrm.scene.traverse(o => {
+                            if (!o.isMesh && !o.isSkinnedMesh) return;
+                            const part = partByTriangles(o);
+                            if (isFaceMesh(o)) {
+                                o.visible = false;
+                                specialFaces.push(o);
+                            } else if (part === 'shoes') {
+                                o.visible = false;
+                            }
+                        });
+
+                        console.log('[diamondAI] 표현용 불러옴 · 얼굴 메시 '
+                            + specialFaces.length + '개');
+                        resolve(vrm);
+                    });
+                }, undefined, (e) => {
+                    console.warn('[diamondAI] 표현용을 못 불러왔다:', e);
+                    resolve(null);
+                });
+            });
+        }
+
+        function hideDressedBody() {
+            // 몸은 표현용 것을 쓴다. 옷 입은 모델의 몸은 감춘다.
+            if (!currentVRM) return;
+
+            // 다만 대신 깔 몸이 있을 때만이다.
+            // 표현용을 안 불러온 채로 감추면 옷만 떠 있게 된다.
+            const swap = !!bodyVRM;
+
+            baseFaces = [];
+            currentVRM.scene.traverse(o => {
+                if (!o.isMesh && !o.isSkinnedMesh) return;
+                if (o.userData && o.userData.bone) return;
+                if (isFaceMesh(o)) { baseFaces.push(o); return; }
+                if (swap && partByTriangles(o) === 'body') o.visible = false;
+            });
+            console.log('[diamondAI] 기본 얼굴 메시 ' + baseFaces.length + '개');
+        }
+
+        function useSpecialFace(on) {
+            if (!specialFaces.length) return;
+            if (showingSpecial === on) return;
+            showingSpecial = on;
+            baseFaces.forEach(m => m.visible = !on);
+            specialFaces.forEach(m => m.visible = on);
+        }
+
+
+        // ============================================================
+        // 몸과 옷 나누기
+        //
+        // VRM 안에서 옷은 이미 따로 그려진다. Body 메시가 프리미티브
+        // 6개(몸·윗옷·신발·뒷머리·원피스)로 나뉘어 있고,
+        // three.js 는 프리미티브 하나를 Mesh 하나로 만들기 때문이다.
+        //
+        // 그러니 새로 자를 것은 없고, 어느 것이 무엇인지 이름표만 붙이면 된다.
+        // 재질 이름이 그 표식이다.
+        // ============================================================
+
+        const PARTS = { body: [], top: [], skirt: [], shoes: [], socks: [], hair: [] };
+
+        function meshTriangles(mesh) {
+            if (!mesh.geometry) return -1;
+            const idx = mesh.geometry.index;
+            return idx ? idx.count / 3
+                       : mesh.geometry.attributes.position.count / 3;
+        }
+
+        function meshLabel(mesh) {
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            return (mats[0] && mats[0].name) || mesh.name || '';
+        }
+
+        // 재질 이름을 먼저 본다.
+        //
+        // 예전에는 삼각형 수만 봤다. 그러다 표현용.vrm 을 다시 내보내면서
+        // 몸이 10022 에서 10934 삼각형이 되자 표에서 사라졌고, 화면에서
+        // 몸이 통째로 없어졌다. 재질 이름은 다시 내보내도 그대로다.
+        // 삼각형 수는 이름을 잃었을 때의 대비로만 남긴다.
+        function partByTriangles(mesh) {
+            const table = (ENTITY && ENTITY.model_parts) || [];
+            if (!table.length) return null;
+
+            const label = meshLabel(mesh).toLowerCase();
+            for (const r of table) {
+                if (r.match && label.includes(r.match)) return r.zone;
+            }
+
+            const tris = meshTriangles(mesh);
+            const hit = table.find(p => p.triangles === tris);
+            return hit ? hit.zone : null;
+        }
+
+        // 이름으로도 한 번 더 본다. 표에 없는 메시를 위한 대비다.
+        function partOf(materialName) {
+            const n = String(materialName || '').toUpperCase();
+            if (n.includes('HAIR')) return 'hair';
+            if (n.includes('ONEPIECE')) return 'skirt';
+            if (n.includes('TOPS')) return 'top';
+            if (n.includes('SHOES')) return 'shoes';
+            return 'body';          // SKIN, FACE, EYE ...
+        }
+
+
+        // ============================================================
+        // 한 덩어리인 옷 자르기
+        //
+        // 신발과 양말은 한 벌로 붙어 있다. 다리 하나가 삼각형 409개짜리
+        // 조각 하나로 발바닥에서 정강이까지 이어져 있어, 조각을 세어
+        // 나눌 수 없다. 그래서 개체가 정해 준 높이에서 삼각형을 갈라
+        // 위쪽만 새 메시로 떼어낸다.
+        //
+        // 정점은 그대로 두고 색인만 나눈다. 같은 뼈대에 다시 묶으므로
+        // 움직임도 그대로다.
+        // ============================================================
+
+        function cutAbove(mesh, cutY) {
+            const geo = mesh.geometry;
+            if (!geo || !geo.index) return null;
+
+            const pos = geo.attributes.position;
+            const idx = geo.index.array;
+            const low = [], high = [];
+
+            for (let i = 0; i < idx.length; i += 3) {
+                const y = (pos.getY(idx[i]) + pos.getY(idx[i + 1])
+                         + pos.getY(idx[i + 2])) / 3;
+                const bin = (y >= cutY) ? high : low;
+                bin.push(idx[i], idx[i + 1], idx[i + 2]);
+            }
+
+            if (!high.length || !low.length) return null;
+
+            const upGeo = geo.clone();
+            upGeo.setIndex(high);
+            upGeo.computeBoundingSphere();
+            upGeo.computeBoundingBox();
+
+            const up = new THREE.SkinnedMesh(upGeo, mesh.material);
+            up.name = mesh.name + '_잘린위';
+            if (mesh.skeleton) up.bind(mesh.skeleton, mesh.bindMatrix);
+            up.bindMode = mesh.bindMode;
+            up.frustumCulled = mesh.frustumCulled;
+            mesh.parent.add(up);
+
+            geo.setIndex(low);
+            geo.computeBoundingSphere();
+            geo.computeBoundingBox();
+
+            return up;
+        }
+
+        function applySplits(parts) {
+            const rules = (ENTITY && ENTITY.model_splits) || [];
+
+            rules.forEach(r => {
+                const src = parts[r.from];
+                if (!src || !src.length) return;
+
+                parts[r.zone] = parts[r.zone] || [];
+
+                src.slice().forEach(m => {
+                    const up = cutAbove(m, r.above);
+                    if (!up) return;
+                    up.userData.part = r.zone;
+                    parts[r.zone].push(up);
+                });
+
+                console.log('[diamondAI] ' + r.from + ' 에서 ' + r.label
+                    + ' ' + parts[r.zone].length + '개를 갈라냈다 ('
+                    + (r.above * 100).toFixed(0) + 'cm 위)');
+            });
+        }
+
+        function splitParts() {
+            Object.keys(PARTS).forEach(k => PARTS[k] = []);
+            cloths.length = 0;      // 다시 나눌 때 겹쳐 쌓이지 않게
+
+            if (!currentVRM) return;
+
+            currentVRM.scene.traverse(o => {
+                if (!o.isMesh && !o.isSkinnedMesh) return;
+                if (o.userData && o.userData.bone) return;   // 판정구는 뺀다
+
+                const mats = Array.isArray(o.material) ? o.material : [o.material];
+                const label = (mats[0] && mats[0].name) || o.name || '';
+
+                // 삼각형 수가 먼저다. 이름은 표에 없을 때만 쓴다.
+                const part = partByTriangles(o) || partOf(label);
+
+                const idx = o.geometry && o.geometry.index;
+                console.log('[diamondAI] 메시 "' + label + '" 삼각형 '
+                    + (idx ? idx.count / 3 : '?') + ' -> ' + part);
+
+                o.userData.part = part;
+
+                if (o.isSkinnedMesh) detachCloth(o);
+
+                PARTS[part].push(o);
+            });
+
+            // 신발에서 양말을 갈라낸다. 따로 벗을 수 있어야 한다.
+            applySplits(PARTS);
+
+            const summary = Object.keys(PARTS)
+                .map(k => k + ' ' + PARTS[k].length).join(', ');
+
+            console.log('[diamondAI] 몸/옷 나눔: ' + summary);
+
+            if (!PARTS.skirt.length && !PARTS.top.length) {
+                console.warn('[diamondAI] 옷 메시를 못 찾았다. 재질 이름을 확인하라:');
+                currentVRM.scene.traverse(o => {
+                    if (!o.isMesh && !o.isSkinnedMesh) return;
+                    if (o.userData && o.userData.bone) return;
+                    const m = Array.isArray(o.material) ? o.material[0] : o.material;
+                    console.warn('   물체 "' + o.name + '"  재질 "'
+                        + (m && m.name) + '"');
+                });
+            }
+        }
+
+
+        // ------------------------------------------------------------
+        // 옷 잡아당기기
+        //
+        // 옷 메시만 살짝 옮겼다가 되돌린다. 스키닝 메시라도 물체 자체를
+        // 옮기면 그대로 딸려 오므로, 뼈를 건드리지 않고 옷만 끌 수 있다.
+        // ------------------------------------------------------------
+
+        const tug = { list: [], offset: new THREE.Vector3(), amount: 0 };
+
+        // 화면에서 끈 방향을 월드 방향으로 옮긴다.
+        //
+        // 화면의 가로·세로는 카메라의 오른쪽·위쪽이다. 그 둘을 섞으면
+        // 보는 각도가 어떻든 '마우스로 끈 쪽'이 나온다.
+        // 화면 y 는 아래가 커지므로 위쪽 축에는 부호를 뒤집어 곱한다.
+        const _camRight = new THREE.Vector3();
+        const _camUp = new THREE.Vector3();
+        const _camBack = new THREE.Vector3();
+
+        function screenPullToWorld(px, py, out) {
+            camera.matrixWorld.extractBasis(_camRight, _camUp, _camBack);
+
+            out.set(0, 0, 0)
+                .addScaledVector(_camRight, px)
+                .addScaledVector(_camUp, -py);
+
+            if (out.lengthSq() < 1e-9) {
+                // 방향이 없으면(단추로 부른 경우) 아래로 늘어뜨린다
+                out.copy(_camUp).multiplyScalar(-1);
+            }
+
+            return out.normalize();
+        }
+
+        function tugCloth(zone, distance, pull) {
+            const meshes = PARTS[zone];
+
+            if (!meshes || !meshes.length) {
+                console.warn('[diamondAI] 끌 옷이 없다: ' + zone);
+                return;
+            }
+
+            tug.list = meshes;
+            tug.amount = 1;
+
+            // 마우스로 끈 방향으로 끌린다.
+            // 어디서도 방향이 오지 않으면 아래로 늘어뜨린다.
+            const dir = new THREE.Vector3();
+            screenPullToWorld(
+                (pull && pull.x) || 0,
+                (pull && pull.y) || 0,
+                dir
+            );
+
+            // 몸에서 살짝 떼어 놓아야 끌린 것이 보인다. 보는 쪽으로 띄운다.
+            camera.matrixWorld.extractBasis(_camRight, _camUp, _camBack);
+
+            tug.offset
+                .copy(dir).multiplyScalar(distance)
+                .addScaledVector(_camBack, distance * 0.3);
+
+            console.log('[diamondAI] 옷 끌림: ' + zone
+                + ' ' + (distance * 100).toFixed(1) + 'cm, 방향 ('
+                + tug.offset.x.toFixed(3) + ', '
+                + tug.offset.y.toFixed(3) + ', '
+                + tug.offset.z.toFixed(3) + '), 메시 '
+                + meshes.length + '개');
+        }
+
+
+        // ------------------------------------------------------------
+        // 옷을 실제로 옮기는 자리
+        //
+        // 스키닝 메시는 position 을 건드려도 꿈쩍도 안 한다. 셰이더가
+        //   matrixWorld * bindMatrixInverse * (본이 만든 월드 좌표)
+        // 를 그리는데, bindMode 가 'attached' 면 three.js 가 매 프레임
+        // bindMatrixInverse = matrixWorld 의 역행렬로 다시 잡아서
+        // 앞의 matrixWorld 와 그대로 상쇄되기 때문이다.
+        //
+        // 'detached' 로 바꾸면 상쇄가 풀리지만, 이번에는 three.js 가
+        // 매 프레임 bindMatrixInverse = bindMatrix 의 역행렬로 되돌린다
+        // (r137 SkinnedMesh.updateMatrixWorld). 그래서 이 값을 손으로
+        // 고쳐 놓아도 첫 프레임에 지워진다. 옷과 머리카락만 앞뒤가
+        // 뒤집혔던 것이 이것 때문이다 — 아바타를 돌려 세운 180도가
+        // 상쇄되지 않고 한 번 더 곱해졌다.
+        //
+        // 그래서 bindMatrixInverse 대신 matrixWorld 쪽을 잡는다.
+        //   matrixWorld = T(옮길 거리) * bindMatrix
+        // 로 두면 셰이더에서 bindMatrix 가 제 역행렬과 만나 지워지고
+        // T 만 남는다. 안 옮겼으면 T 가 단위행렬이라 원래 자리 그대로다.
+        //
+        // matrixWorld 는 three.js 가 parent.matrixWorld * matrix 로
+        // 만드니 우리가 쥘 것은 matrix 다. matrixAutoUpdate 를 끈다.
+        //
+        // 옮기는 거리는 월드 기준이다. 마우스로 끈 방향을 그대로 쓸 수 있다.
+        // ------------------------------------------------------------
+
+        const cloths = [];
+        const _tugMat = new THREE.Matrix4();
+        const _parentInv = new THREE.Matrix4();
+
+        function detachCloth(m) {
+            m.bindMode = 'detached';
+            m.matrixAutoUpdate = false;
+            m.userData.tug = new THREE.Vector3();
+            cloths.push(m);
+            placeCloth(m);
+        }
+
+        function placeCloth(m) {
+            if (!m.parent) return;
+
+            // 아바타가 걸어 다니면 부모의 matrixWorld 가 바뀐다.
+            // 그때마다 다시 잡지 않으면 옷만 딴 데로 간다.
+            m.parent.updateWorldMatrix(true, false);
+
+            const d = m.userData.tug;
+            _tugMat.makeTranslation(d.x, d.y, d.z).multiply(m.bindMatrix);
+            _parentInv.copy(m.parent.matrixWorld).invert();
+
+            m.matrix.multiplyMatrices(_parentInv, _tugMat);
+            m.matrixWorldNeedsUpdate = true;
+        }
+
+        function placeAllCloths() {
+            for (let i = 0; i < cloths.length; i++) placeCloth(cloths[i]);
+        }
+
+        function updateTug(dt) {
+            if (!tug.list.length) return;
+
+            // 되돌아가는 속도. 확 당겼다가 천천히 놓는 느낌으로.
+            tug.amount -= dt * 1.8;
+            if (tug.amount < 0) tug.amount = 0;
+
+            const e = tug.amount * tug.amount;      // 끝에서 부드럽게
+
+            tug.list.forEach(m => {
+                if (!m.userData.tug) return;
+                m.userData.tug.set(
+                    tug.offset.x * e,
+                    tug.offset.y * e,
+                    tug.offset.z * e
+                );
+            });
+
+            if (tug.amount === 0) {
+                tug.list.forEach(m => {
+                    if (m.userData.tug) m.userData.tug.set(0, 0, 0);
+                });
+                tug.list = [];
+            }
+        }
+
+
+        // ============================================================
+        // 만지기
+        //
+        // 메시를 직접 레이캐스트하지 않는다. 15MB 짜리라 비싸고,
+        // 스키닝을 라이브러리가 반영해 주는지에 따라 결과가 달라진다.
+        // 대신 개체가 내려준 '판정구'를 본에 붙여 그것만 맞힌다.
+        // 본에 붙어 있으니 자세가 바뀌어도 그대로 따라가고,
+        // 맞은 공이 곧 어느 본인지 알려준다.
+        // ============================================================
+
+        const raycaster = new THREE.Raycaster();
+        const pointerNDC = new THREE.Vector2();
+
+        let hitboxes = [];
+        let showHitboxes = false;
+
+        const HITBOX_HIDDEN = new THREE.MeshBasicMaterial({
+            colorWrite: false, depthWrite: false, transparent: true, opacity: 0
+        });
+
+        const HITBOX_SHOWN = new THREE.MeshBasicMaterial({
+            color: 0x7a68b0, wireframe: true, transparent: true, opacity: 0.55
+        });
+
+        function buildHitboxes() {
+            hitboxes.forEach(h => h.parent && h.parent.remove(h));
+            hitboxes = [];
+
+            if (!currentVRM || !ENTITY || !ENTITY.touch) return;
+
+            const geo = new THREE.SphereGeometry(1, 10, 8);
+
+            (ENTITY.touch.hitboxes || []).forEach(h => {
+                let node = null;
+                try {
+                    node = currentVRM.humanoid.getBoneNode(h.bone);
+                } catch (e) {}
+                if (!node) return;
+
+                const m = new THREE.Mesh(geo, HITBOX_HIDDEN);
+                m.position.set(h.offset[0], h.offset[1], h.offset[2]);
+                m.scale.setScalar(h.radius);
+                m.userData.bone = h.bone;
+                // 옷 판정구는 자기가 어느 자리인지 직접 들고 있다
+                m.userData.zone = h.zone || null;
+                m.raycast = THREE.Mesh.prototype.raycast;
+                node.add(m);
+                hitboxes.push(m);
+            });
+
+            console.log('[diamondAI] 판정구 ' + hitboxes.length + '개');
+        }
+
+        function toggleHitboxes() {
+            showHitboxes = !showHitboxes;
+            hitboxes.forEach(h => h.material =
+                showHitboxes ? HITBOX_SHOWN : HITBOX_HIDDEN);
+        }
+
+        function pickBone(event) {
+            if (!hitboxes.length) return null;
+
+            const rect = canvas.getBoundingClientRect();
+            pointerNDC.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            pointerNDC.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(pointerNDC, camera);
+
+            const hits = raycaster.intersectObjects(hitboxes, false);
+            if (!hits.length) return null;
+
+            const hit = hits[0];
+            const node = hit.object.parent;
+            const local = node.worldToLocal(hit.point.clone());
+
+            return {
+                bone: hit.object.userData.bone,
+                zone: hit.object.userData.zone,
+                local: [local.x, local.y, local.z]
+            };
+        }
+
+
+        // ------------------------------------------------------------
+        // 누르기와 쓰다듬기
+        //
+        // 누르고 조금이라도 끌면 쓰다듬기로 본다.
+        // 끈 거리가 쌓일 때마다 한 번씩 반응하되, 너무 자주 말하지 않도록
+        // 개체가 정한 간격을 지킨다.
+        // ------------------------------------------------------------
+
+        // ------------------------------------------------------------
+        // 무엇으로 만질지 고르기
+        //
+        // 같은 자리를 만져도 손으로 만지는 것과 입을 맞추는 것은 다르다.
+        // 도구 목록과 그 반응은 개체가 가지고 있고, 여기서는 고르기만 한다.
+        // ------------------------------------------------------------
+
+        const toolBadge = document.getElementById('tool-badge');
+        const toolMenu = document.getElementById('tool-menu');
+
+        let currentTool = null;
+        let myAffinity = null;      // 잠긴 도구를 표시하는 데만 쓴다
+        let myStageKey = null;      // 존댓말인지 반말인지 고르는 데 쓴다
+
+        function tools() {
+            return (ENTITY && ENTITY.touch && ENTITY.touch.tools) || [];
+        }
+
+        function toolLocked(t) {
+            if (!t.allow_bonus) return false;
+            if (myAffinity === null) return false;
+            // 어느 자리든 이 도구로 만질 수 있는 곳이 하나라도 있는지
+            const zones = (ENTITY.touch.zones || []);
+            return !zones.some(z =>
+                myAffinity >= ((z.allow_from || 0) + t.allow_bonus));
+        }
+
+        function setTool(key) {
+            const list = tools();
+            currentTool = list.find(t => t.key === key) || list[0] || null;
+            if (currentTool) {
+                toolBadge.textContent = currentTool.icon + ' ' + currentTool.label;
+            }
+            buildToolMenu();
+        }
+
+        function buildToolMenu() {
+            const list = tools();
+            if (!list.length) return;
+
+            toolMenu.innerHTML = '';
+
+            const head = document.createElement('div');
+            head.className = 'head';
+            head.textContent = '무엇으로 만질까';
+            toolMenu.appendChild(head);
+
+            list.forEach(t => {
+                const locked = toolLocked(t);
+
+                const row = document.createElement('div');
+                row.className = 'item'
+                    + (currentTool && t.key === currentTool.key ? ' on' : '')
+                    + (locked ? ' locked' : '');
+
+                const icon = document.createElement('span');
+                icon.className = 'icon';
+                icon.textContent = t.icon;
+                row.appendChild(icon);
+
+                const text = document.createElement('span');
+                text.innerHTML = t.label +
+                    (t.description ? '<span class="desc">' + t.description + '</span>' : '');
+                row.appendChild(text);
+
+                if (locked) {
+                    const lock = document.createElement('span');
+                    lock.className = 'lock';
+                    lock.textContent = '아직';
+                    row.appendChild(lock);
+                }
+
+                // 잠겨 있어도 고를 수는 있다. 만지면 거절당할 뿐이다.
+                row.onclick = () => {
+                    setTool(t.key);
+                    hideToolMenu();
+                };
+
+                toolMenu.appendChild(row);
+            });
+        }
+
+        function showToolMenu(x, y) {
+            buildToolMenu();
+            toolMenu.style.display = 'block';
+
+            const box = toolMenu.getBoundingClientRect();
+            const area = document.getElementById('avatar-container')
+                .getBoundingClientRect();
+
+            let left = x - area.left;
+            let top = y - area.top;
+
+            if (left + box.width > area.width) left = area.width - box.width - 8;
+            if (top + box.height > area.height) top = area.height - box.height - 8;
+
+            toolMenu.style.left = Math.max(6, left) + 'px';
+            toolMenu.style.top = Math.max(6, top) + 'px';
+        }
+
+        function hideToolMenu() {
+            toolMenu.style.display = 'none';
+        }
+
+
+        // ------------------------------------------------------------
+        // 옷 벗기기
+        //
+        // 옷을 두 번 누르면 벗는다. 두 번 더 누르면 다시 입는다.
+        // 그 옷을 만져도 되는 사이여야 한다 — 서버가 판단한다.
+        //
+        // 벗기면 그 자리에 몸이 드러난다. 표현용 몸을 깔아 두었기에
+        // 가능한 일이다(model.layered). 안 깔았으면 구멍이 보인다.
+        // ------------------------------------------------------------
+
+        const wearing = {};      // 자리 -> 입고 있는가
+
+        async function undress(zoneKey) {
+            const meshes = PARTS[zoneKey];
+            if (!meshes || !meshes.length) return;
+
+            const on = wearing[zoneKey] !== false;   // 기본은 입고 있음
+
+            try {
+                const d = await fetch('/api/undress', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ zone: zoneKey, wearing: on }),
+                }).then(r => r.json());
+
+                if (!d.ok) {
+                    if (d.reply) showReply(d.reply, d.expression || 'angry', null);
+                    return;
+                }
+
+                // 벗기거나 입힌다
+                meshes.forEach(m => m.visible = !on);
+                wearing[zoneKey] = !on;
+
+                if (d.reply) showReply(d.reply, d.expression || 'surprised', null);
+
+                console.log('[diamondAI] ' + zoneKey
+                    + (on ? ' 벗음' : ' 입음'));
+
+            } catch (e) {
+                console.warn('[diamondAI] 옷 벗기기 실패', e);
+            }
+        }
+
+        canvas.addEventListener('dblclick', (e) => {
+            const hit = pickBone(e);
+            if (!hit || !hit.zone) return;
+
+            const list = (ENTITY && ENTITY.touch && ENTITY.touch.undress
+                && ENTITY.touch.undress.zones) || ['top', 'skirt', 'shoes'];
+
+            if (list.indexOf(hit.zone) < 0) return;
+
+            e.preventDefault();
+            undress(hit.zone);
+        });
+
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            showToolMenu(e.clientX, e.clientY);
+        });
+
+        toolBadge.addEventListener('click', (e) => {
+            e.preventDefault();
+            showToolMenu(e.clientX, e.clientY);
+        });
+
+        toolBadge.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            showToolMenu(e.clientX, e.clientY);
+        });
+
+        document.addEventListener('pointerdown', (e) => {
+            if (!toolMenu.contains(e.target) && e.target !== toolBadge) {
+                hideToolMenu();
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') hideToolMenu();
+        });
+
+
+        const touchState = {
+            down: false,
+            petting: false,
+            dragged: 0,
+            sinceStroke: 0,
+            strokes: 0,
+            lastX: 0,
+            lastY: 0,
+            hit: null,
+            lastFire: 0,
+            busy: false
+        };
+
+        function touchCfg(key, fallback) {
+            const t = (ENTITY && ENTITY.touch) || {};
+            const v = t[key];
+            return (typeof v === 'number') ? v : fallback;
+        }
+
+        async function sendTouch(kind, hit, count) {
+            const now = Date.now();
+            if (touchState.busy) return;
+            if (now - touchState.lastFire < touchCfg('cooldown_ms', 700)) return;
+
+            touchState.lastFire = now;
+            touchState.busy = true;
+
+            try {
+                const res = await fetch('/api/touch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bone: hit.bone,
+                        zone: hit.zone,
+                        local: hit.local,
+                        kind: kind,
+                        count: count,
+                        tool: currentTool ? currentTool.key : null
+                    })
+                });
+
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+
+                const data = await res.json();
+                if (data.hit) playTouchReaction(data);
+
+            } catch (e) {
+                console.warn('[diamondAI] 만지기 반응 실패:', e);
+            } finally {
+                touchState.busy = false;
+            }
+        }
+
+        function playTouchReaction(data) {
+            if (isSleeping) wakeUp();
+
+            // 만졌으면 그쪽을 본다
+            faceUser();
+
+            // 기분이 움직였으면 눈금 이름표에 반영한다
+            if (typeof data.mood === 'number') {
+                myMood.level = data.mood;
+                myMood.label = data.mood_label || null;
+            }
+
+            // 사이가 달라지면 눈금도 잠긴 도구도 달라진다
+            if (typeof data.affinity === 'number') {
+                myAffinity = data.affinity;
+                myStageKey = data.stage || myStageKey;
+                setAffinity(data.affinity, data.stage_label);
+                buildToolMenu();
+            }
+
+            if (data.silent) {
+                // 입을 닫았다. 만져도 말하지 않는다.
+                showSilence(data.expression || 'angry');
+                return;
+            }
+
+            // 여러 번 잡아당겼으면 옷이 실제로 끌려온다
+            if (data.tug) {
+                tugCloth(data.tug.zone, data.tug.distance, {
+                    x: touchState.pullX || 0,
+                    y: touchState.pullY || 0,
+                });
+            }
+
+            if (data.reply) {
+                showReply(data.reply, data.expression || 'neutral', null);
+            } else {
+                applyExpression(data.expression || 'neutral');
+            }
+
+            // 표정이 둘 이어지는 자리가 있다.
+            //
+            // 손을 잡히면 먼저 놀라고, 곧 좋아하는 얼굴이 된다.
+            // 한 얼굴로는 그 흐름이 안 나온다. 놀람은 스치듯 짧게.
+            if (data.expression_then) {
+                const first = expressionByKey(data.expression || '');
+                const ms = (first && first.hold_ms) ? first.hold_ms : 900;
+
+                setTimeout(() => {
+                    applyExpression(data.expression_then);
+                }, Math.min(ms, 1000));
+            }
+
+            // 몸짓은 돌아다니기보다 우선한다
+            if (data.motion) {
+                roam.state = 'gesture';
+                playMotion(data.motion);
+            }
+        }
+
+        canvas.addEventListener('pointerdown', (e) => {
+            const hit = pickBone(e);
+
+            // 아바타를 눌렀으면 만지는 것이고, 빈 곳이면 시점을 돌리는 것이다.
+            // 둘 다 왼쪽 끌기라 여기서 갈라 줘야 서로 방해하지 않는다.
+            controls.enabled = !hit;
+
+            if (!hit) return;
+
+            e.preventDefault();
+            canvas.setPointerCapture(e.pointerId);
+
+            touchState.down = true;
+            touchState.petting = false;
+            touchState.dragged = 0;
+            touchState.sinceStroke = 0;
+            touchState.strokes = 0;
+            touchState.lastX = e.clientX;
+            touchState.lastY = e.clientY;
+            // 옷이 끌려갈 방향을 알려면 어디서 시작했는지가 있어야 한다
+            touchState.fromX = e.clientX;
+            touchState.fromY = e.clientY;
+            touchState.pullX = 0;
+            touchState.pullY = 0;
+            touchState.hit = hit;
+        });
+
+        canvas.addEventListener('pointermove', (e) => {
+
+            if (!touchState.down) {
+                // 누르지 않았을 때는 만질 수 있는 곳인지 알려만 준다
+                canvas.style.cursor = pickBone(e) ? 'grab' : 'default';
+                return;
+            }
+
+            const dx = e.clientX - touchState.lastX;
+            const dy = e.clientY - touchState.lastY;
+            const step = Math.hypot(dx, dy);
+
+            touchState.lastX = e.clientX;
+            touchState.lastY = e.clientY;
+            touchState.dragged += step;
+            touchState.sinceStroke += step;
+
+            // 잡은 자리에서 지금까지 끌어온 방향. 옷은 이쪽으로 끌린다.
+            touchState.pullX = e.clientX - touchState.fromX;
+            touchState.pullY = e.clientY - touchState.fromY;
+
+            // 끄는 동안 다른 자리로 넘어가면 그 자리로 바꾼다
+            const here = pickBone(e);
+            if (here) touchState.hit = here;
+
+            if (touchState.dragged >= touchCfg('pet_drag_px', 26)) {
+                touchState.petting = true;
+                canvas.style.cursor = 'grabbing';
+            }
+
+            if (touchState.petting &&
+                touchState.sinceStroke >= touchCfg('pet_stroke_px', 90)) {
+
+                touchState.sinceStroke = 0;
+                touchState.strokes += 1;
+
+                if (touchState.hit) {
+                    sendTouch('pet', touchState.hit, touchState.strokes);
+                }
+            }
+        });
+
+        function endTouch(e) {
+            // 다음 번에 빈 곳을 끌면 시점이 돌아야 한다
+            controls.enabled = true;
+
+            if (!touchState.down) return;
+
+            touchState.down = false;
+            canvas.style.cursor = pickBone(e) ? 'grab' : 'default';
+
+            // 끌지 않았으면 그냥 한 번 누른 것이다
+            if (!touchState.petting && touchState.hit) {
+                sendTouch('tap', touchState.hit, 1);
+            }
+
+            // 쓰다듬다 말았는데 아직 한 번도 반응하지 않았다면 한 번은 해준다
+            if (touchState.petting && touchState.strokes === 0 && touchState.hit) {
+                sendTouch('pet', touchState.hit, 1);
+            }
+
+            touchState.petting = false;
+        }
+
+        canvas.addEventListener('pointerup', endTouch);
+        canvas.addEventListener('pointercancel', endTouch);
+        canvas.addEventListener('pointerleave', (e) => {
+            if (!touchState.down) canvas.style.cursor = 'default';
+        });
+
+        // 판정구를 눈으로 확인하고 싶을 때
+        window.addEventListener('keydown', (e) => {
+            if (document.activeElement === chatInput) return;
+
+            if (e.key === 'h' || e.key === 'H') {
+                toggleHitboxes();
+            }
+
+            // 시점을 원래대로
+            if (e.key === 'r' || e.key === 'R') {
+                resetCamera();
+            }
+
+            // 옷 끌림을 손으로 시험한다. 끄는 횟수를 채우지 않고도 볼 수 있다.
+            if (e.key === 't' || e.key === 'T') {
+                tugCloth('skirt', 0.08);
+            }
+            if (e.key === 'y' || e.key === 'Y') {
+                tugCloth('top', 0.08);
+            }
+        });
+
+
+        // ============================================================
+        // 눈 상태
+        // ============================================================
+
+        function setEyeState(close) {
+
+            if (
+                !currentVRM ||
+                !currentVRM.blendShapeProxy
+            ) {
+                return;
+            }
+
+            try {
+
+                const presetName =
+                    (
+                        THREE.VRMBlendShapePresetName &&
+                        THREE.VRMBlendShapePresetName.Blink
+                    )
+                        ? THREE.VRMBlendShapePresetName.Blink
+                        : 'blink';
+
+                currentVRM.blendShapeProxy.setValue(
+                    presetName,
+                    close ? 1.0 : 0.0
+                );
+
+                currentVRM.blendShapeProxy.update();
+
+            } catch (e) {
+
+                console.warn(
+                    "눈 상태 변경 실패:",
+                    e
+                );
+
+            }
+        }
+
+
+        // ============================================================
+        // 표정 적용
+        // ============================================================
+
+        // ============================================================
+        // 새 아바타의 커스텀 놀람 표정 자동 탐색
+        // ============================================================
+
+        let surprisedBlendShapeName = null;
+
+        function detectSurprisedBlendShape(gltf) {
+            surprisedBlendShapeName = null;
+
+            try {
+                // 최상위 확장은 gltf.userData 에 들어가지 않는다.
+                // GLTFLoader 는 그걸 parser.json 에만 남긴다.
+                // 여기를 userData 로만 보고 있어서 목록이 늘 비었고,
+                // 그래서 놀람 표정이 한 번도 걸리지 않았다.
+                const ext = (gltf && gltf.parser && gltf.parser.json
+                             && gltf.parser.json.extensions
+                             && gltf.parser.json.extensions.VRM)
+                    || (gltf && gltf.userData
+                        && gltf.userData.gltfExtensions
+                        && gltf.userData.gltfExtensions.VRM);
+
+                const groups = ext && ext.blendShapeMaster
+                    && ext.blendShapeMaster.blendShapeGroups;
+                const names = Array.isArray(groups)
+                    ? groups.map(g => g?.name).filter(Boolean)
+                    : [];
+
+                console.log('[diamondAI] VRM 표정 목록:', names);
+
+                const normalize = value => String(value)
+                    .trim().toLowerCase().replace(/[ _-]/g, '');
+
+                const exactCandidates = [
+                    'surprised', 'surprise', 'shocked', 'shock',
+                    '놀람', '놀람표정', '驚き'
+                ];
+
+                for (const candidate of exactCandidates) {
+                    const found = names.find(name =>
+                        normalize(name) === normalize(candidate)
+                    );
+                    if (found) {
+                        surprisedBlendShapeName = found;
+                        break;
+                    }
+                }
+
+                if (!surprisedBlendShapeName) {
+                    const found = names.find(name => {
+                        const n = normalize(name);
+                        return n.includes('surpris') ||
+                               n.includes('shock') ||
+                               n.includes('놀람') ||
+                               n.includes('驚');
+                    });
+                    if (found) surprisedBlendShapeName = found;
+                }
+
+                if (surprisedBlendShapeName) {
+                    console.log(
+                        '[diamondAI] 놀람 표정 발견:',
+                        surprisedBlendShapeName
+                    );
+                } else {
+                    console.warn(
+                        '[diamondAI] 커스텀 놀람 표정을 찾지 못했어. VRM 표정 목록을 확인해줘.'
+                    );
+                }
+            } catch (error) {
+                console.warn('[diamondAI] 놀람 표정 탐색 실패:', error);
+            }
+        }
+
+
+        // ============================================================
+        // 표정 적용
+        // ============================================================
+
+        // 말하는 동안 입 대신 얹어 둔 조각들.
+        //
+        // 표정 그룹(ALL_*)은 눈·눈썹·입이 한 덩어리라 입만 뺄 수 없다.
+        // 그래서 말할 때는 그룹을 끄고 눈·눈썹 조각을 직접 얹는다.
+        // 여기 적어 두었다가 다음 번에 지운다.
+        const speakMorphs = new Set();
+
+        function isSpeaking() {
+            return !!lipSyncTimer;
+        }
+
+        function applyExpression(expression) {
+            if (!currentVRM || !currentVRM.blendShapeProxy) return;
+
+            // 부정적인 표현이 사라지는 단계면 여기서 갈아 끼운다.
+            expression = swapNegative('expressions', expression);
+
+            try {
+                // 절정 표정은 표현용 얼굴에서 짓는다. 그때 얼굴을 바꿔 낀다.
+                const spec = ENTITY && ENTITY.expressions
+                    && ENTITY.expressions.find(x => x.key === expression);
+                const special = !!(spec && spec.source === 'special')
+                    && !!bodyVRM;
+
+                useSpecialFace(special);
+
+                const proxy = (special && bodyVRM)
+                    ? bodyVRM.blendShapeProxy
+                    : currentVRM.blendShapeProxy;
+
+                if (!proxy) return;
+                currentExpression = expression;
+                isExpressing = expression !== 'neutral';
+
+                // 지울 이름은 개체가 알려준 목록을 쓴다.
+                const clearNames = ENTITY_SHAPES.length
+                    ? ENTITY_SHAPES
+                    : ['joy', 'angry', 'sorrow', 'fun',
+                       'surprised', 'blink', 'blink_l', 'blink_r'];
+
+                clearNames.forEach(name => {
+                    try { proxy.setValue(name, 0.0); } catch (e) {}
+                });
+
+                if (surprisedBlendShapeName) {
+                    try { proxy.setValue(surprisedBlendShapeName, 0.0); } catch (e) {}
+                }
+
+                // 말하는 동안에는 입을 립싱크에 넘긴다.
+                //
+                // 웃는 입이 벌어져 있는데 그 위에 '아' 가 얹히면 입이
+                // 두 겹으로 일그러진다. 평온할 때 말하는 입이 가장
+                // 자연스러운 것도 그래서다 — 겹칠 입이 없기 때문이다.
+                //
+                // 그래서 말할 때는 표정 그룹을 끄고 눈·눈썹 조각만 얹는다.
+                const talking = isSpeaking();
+                const SP = (ENTITY && ENTITY.behavior
+                    && ENTITY.behavior.speaking) || {};
+                const toParts = SP.group_to_parts || {};
+                const mouthPre = SP.mouth_prefixes || ['Fcl_MTH_', 'Fcl_HA_'];
+
+                // 지난번에 얹어 둔 조각을 먼저 걷는다
+                speakMorphs.forEach(n => setMorph(n, 0));
+                speakMorphs.clear();
+
+                // 표정 수치는 이 파일이 정하지 않는다. 개체가 정한다.
+                const shapes = entityShapesFor(expression) || {};
+                Object.keys(shapes).forEach(name => {
+                    const parts = talking ? toParts[name] : null;
+
+                    if (parts) {
+                        // 입을 뺀 채로 눈과 눈썹만
+                        parts.forEach(n => {
+                            setMorph(n, shapes[name]);
+                            speakMorphs.add(n);
+                        });
+                        return;
+                    }
+
+                    try { proxy.setValue(name, shapes[name]); } catch (e) {}
+                });
+
+                // 부위별 모프도 개체가 정한 대로 얹는다
+                clearMorphs();
+                const morphs = entityMorphsFor(expression) || {};
+                Object.keys(morphs).forEach(n => {
+                    // 말하는 중이면 입을 건드리는 조각은 빼둔다
+                    if (talking && mouthPre.some(p => n.indexOf(p) === 0)) return;
+                    setMorph(n, morphs[n]);
+                });
+
+                // 단계에 붙어 있는 얼굴은 표정과 상관없이 늘 걸린다.
+                // 얀데레의 빈 눈이 그것이다 — 웃어도 눈에 빛이 없다.
+                const sm = stageMorphs();
+                Object.keys(sm).forEach(n => setMorph(n, sm[n]));
+
+                if (!Object.keys(shapes).length
+                    && !Object.keys(morphs).length) {
+                    isExpressing = false;
+                }
+
+                // 표정이 눈 자체를 쓰는 것이면 눈을 뜨게 하면 안 된다.
+                // 눈 감기·윙크가 blink 값을 쓰는데 여기서 0으로 되돌리면
+                // 감으라고 해 놓고 곧바로 뜨는 꼴이 된다.
+                const usesEyes = Object.keys(shapes)
+                    .some(n => String(n).indexOf('blink') === 0);
+
+                if (expression !== 'neutral' && !usesEyes) {
+                    isBlinking = false;
+                    blinkProgress = 0;
+                    blinkTimer = 0;
+                    setEyeState(false);
+                }
+
+                if (usesEyes) {
+                    // 감고 있는 동안 저절로 깜빡이면 값이 흔들린다
+                    isBlinking = false;
+                    blinkProgress = 0;
+                    blinkTimer = 0;
+                }
+
+                // 자는 중이면 눈은 감은 채로 둔다.
+                // 위에서 지우는 목록에 blink 가 들어 있어서,
+                // 그냥 두면 표정을 건드릴 때마다 눈이 떠진다.
+                if (isSleeping) {
+                    isBlinking = false;
+                    blinkProgress = 0;
+                    setEyeState(true);
+                }
+
+                proxy.update();
+
+                // 지금 기분을 화면 오른쪽 위에도 알린다
+                if (typeof setMood === 'function') setMood(expression);
+
+            } catch (e) {
+                console.log('표정 적용 실패:', e);
+            }
+        }
+
+
+
+        // ============================================================
+        // 한국어 텍스트 → 립싱크 모음
+        // ============================================================
+
+        function textToVisemes(text) {
+
+            const visemes = [];
+
+            for (
+                let i = 0;
+                i < text.length;
+                i++
+            ) {
+
+                const char = text[i];
+
+                const code =
+                    char.charCodeAt(0);
+
+
+                // 한글
+                if (
+                    code >= 0xAC00 &&
+                    code <= 0xD7A3
+                ) {
+
+                    const vowelIndex =
+                        Math.floor(
+                            ((code - 0xAC00) % 588) / 28
+                        );
+
+
+                    if (
+                        [0, 1, 2, 3, 9]
+                            .includes(vowelIndex)
+                    ) {
+
+                        visemes.push('a');
+
+                    } else if (
+                        [4, 5, 6, 7, 14, 15]
+                            .includes(vowelIndex)
+                    ) {
+
+                        visemes.push('e');
+
+                    } else if (
+                        [8, 12, 13]
+                            .includes(vowelIndex)
+                    ) {
+
+                        visemes.push('o');
+
+                    } else if (
+                        [11, 16, 17, 18, 19]
+                            .includes(vowelIndex)
+                    ) {
+
+                        visemes.push('u');
+
+                    } else {
+
+                        visemes.push('i');
+
+                    }
+
+                }
+
+                // 영어
+                else if (/[aA]/.test(char)) {
+
+                    visemes.push('a');
+
+                } else if (/[iI]/.test(char)) {
+
+                    visemes.push('i');
+
+                } else if (/[uU]/.test(char)) {
+
+                    visemes.push('u');
+
+                } else if (/[eE]/.test(char)) {
+
+                    visemes.push('e');
+
+                } else if (/[oO]/.test(char)) {
+
+                    visemes.push('o');
+
+                }
+
+                // 공백 / 문장부호
+                else if (
+                    char === ' ' ||
+                    char === '.' ||
+                    char === ',' ||
+                    char === '!' ||
+                    char === '?' ||
+                    char === '。' ||
+                    char === '！' ||
+                    char === '？'
+                ) {
+
+                    visemes.push(null);
+                }
+            }
+
+            return visemes;
+        }
+
+
+        // ============================================================
+        // 목표 입 모양 초기화
+        // ============================================================
+
+        function resetTargetVowels() {
+
+            Object.keys(
+                targetVowelValues
+            ).forEach(v => {
+
+                targetVowelValues[v] = 0;
+
+            });
+        }
+
+
+        // ============================================================
+        // 립싱크
+        // ============================================================
+
+                        // ------------------------------------------------------------
+        // 말하는 도중 얼굴이 바뀌는 자리
+        //
+        // 예전에는 이모지 목록을 이 파일에 손으로 적어 두고 글자 하나와
+        // 맞춰 봤다. 그래서 '좋아' 'ㅋㅋ' '슬퍼' 처럼 두 글자 이상인 신호는
+        // 한 번도 걸린 적이 없었다 — 글자 하나와 같을 수가 없기 때문이다.
+        // 목록도 개체와 따로 놀아서 한쪽만 고치면 어긋났다.
+        //
+        // 이제 지나온 글자를 조금 쥐고 있다가, 개체가 들고 있는
+        // live_triggers 로 끝나는지 본다. 여러 글자짜리도 걸린다.
+        // ------------------------------------------------------------
+
+        let spokenTail = '';
+
+        function liveTrigger(ch) {
+            spokenTail = (spokenTail + ch).slice(-10);
+
+            const list = (ENTITY && ENTITY.expressions) || [];
+
+            for (const e of list) {
+                if (e.key === 'neutral' || !e.live_triggers) continue;
+
+                const hit = e.live_triggers.some(t => t && spokenTail.endsWith(t));
+                if (!hit) continue;
+
+                if (window.expressionChangeTimer) {
+                    clearTimeout(window.expressionChangeTimer);
+                }
+
+                applyExpression(e.key);
+                spokenTail = '';        // 같은 신호가 두 번 걸리지 않게
+
+                const ms = e.hold_ms || 3000;
+                window.expressionChangeTimer = setTimeout(() => {
+                    applyExpression('neutral');
+                }, ms);
+
+                return e.key;
+            }
+
+            return null;
+        }
+
+
+        // ============================================================
+        // 목소리
+        //
+        // 소리를 어디서 만들지는 서버가 정한다.
+        //   browser — 브라우저에 들어 있는 한국어 목소리로 여기서 읽는다
+        //   gemini  — 서버가 만든 소리를 받아 튼다 (아케르나르)
+        //
+        // 어느 쪽이든 입 모양은 '실제로 소리가 나는 길이'에 맞춘다.
+        // 예전에는 글자당 0.1초로 고정이라, 소리가 끝났는데 입만 계속
+        // 움직이거나 그 반대가 되는 일이 있었다.
+        // ============================================================
+
+        const voice = {
+            on: true,
+            provider: 'browser',
+            lang: 'ko-KR',
+            rate: 1.0,
+            pitch: 1.05,
+            pick: null,          // 브라우저 목소리 하나
+            audio: null,         // 지금 나고 있는 소리
+            // 한 글자를 읽는 데 실제로 걸리는 시간(ms).
+            // 첫 문장을 말해 보고 재서 채운다. 그전에는 0 이다.
+            msPerChar: 0,
+        };
+
+        async function loadVoice() {
+            try {
+                const d = await fetch('/api/tts/config').then(r => r.json());
+                voice.on = d.enabled !== false;
+                voice.provider = d.provider || 'browser';
+                voice.lang = d.lang || 'ko-KR';
+                voice.rate = d.rate || 1.0;
+                voice.pitch = d.pitch || 1.05;
+
+                pickBrowserVoice();
+                console.log('[diamondAI] 목소리: ' + voice.provider
+                    + (voice.pick ? ' · ' + voice.pick.name : ''));
+            } catch (e) {
+                console.warn('[diamondAI] 목소리 설정을 못 불러왔다', e);
+            }
+        }
+
+        function pickBrowserVoice() {
+            if (!window.speechSynthesis) return;
+
+            const all = speechSynthesis.getVoices();
+            if (!all.length) return;      // 아직 안 불려왔다. onvoiceschanged 가 다시 부른다
+
+            const ko = all.filter(v => (v.lang || '').toLowerCase().startsWith('ko'));
+
+            // 한국어 중에서도 여성 목소리를 앞에 둔다
+            const want = ['heami', 'sunhi', 'yuna', 'female', '여성'];
+            ko.sort((a, b) => {
+                const sa = want.findIndex(w => (a.name || '').toLowerCase().includes(w));
+                const sb = want.findIndex(w => (b.name || '').toLowerCase().includes(w));
+                return (sa < 0 ? 9 : sa) - (sb < 0 ? 9 : sb);
+            });
+
+            voice.pick = ko[0] || null;
+        }
+
+        if (window.speechSynthesis) {
+            speechSynthesis.onvoiceschanged = pickBrowserVoice;
+        }
+
+        function stopVoice() {
+            if (voice.audio) {
+                try { voice.audio.pause(); } catch (e) {}
+                voice.audio = null;
+            }
+            if (window.speechSynthesis) {
+                try { speechSynthesis.cancel(); } catch (e) {}
+            }
+        }
+
+        // 소리를 내고, 그 길이를 알려준다.
+        //
+        // 길이를 알면 입 모양을 거기에 맞출 수 있다. 못 알아내면
+        // 0 을 돌려주고, 그때는 글자 수로 어림잡은 값을 그대로 쓴다.
+        async function speak(text) {
+            if (!voice.on || !text) return 0;
+
+            stopVoice();
+
+            if (voice.provider === 'gemini') {
+                try {
+                    const d = await fetch('/api/tts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text }),
+                    }).then(r => r.json());
+
+                    if (d.ok && d.audio) {
+                        const wav = pcmToWav(d.audio, d.mime);
+                        const a = new Audio(wav);
+                        voice.audio = a;
+                        await a.play().catch(() => {});
+                        return await new Promise(res => {
+                            a.onloadedmetadata = () => res(a.duration * 1000);
+                            setTimeout(() => res(0), 400);
+                        });
+                    }
+                } catch (e) {
+                    console.warn('[diamondAI] 서버 목소리 실패, 브라우저로', e);
+                }
+            }
+
+            // 브라우저 목소리
+            if (!window.speechSynthesis) return 0;
+
+            const u = new SpeechSynthesisUtterance(text);
+            u.lang = voice.lang;
+            u.rate = voice.rate;
+            u.pitch = voice.pitch;
+            if (voice.pick) u.voice = voice.pick;
+
+            // 브라우저는 소리 길이를 미리 안 알려준다.
+            //
+            // 그래서 실제로 걸린 시간을 재 두었다가 다음 문장에 쓴다.
+            // 목소리와 말 속도에 따라 저절로 맞춰진다.
+            let began = 0;
+            u.onstart = () => { began = performance.now(); };
+            u.onend = () => {
+                if (!began) return;
+                const took = performance.now() - began;
+                const n = Math.max(1, Array.from(text).length);
+                const each = took / n;
+
+                // 한 번 튄 값에 휘둘리지 않게 조금씩만 옮긴다
+                voice.msPerChar = voice.msPerChar
+                    ? voice.msPerChar * 0.7 + each * 0.3
+                    : each;
+
+                console.log('[diamondAI] 말 속도 실측 '
+                    + each.toFixed(0) + 'ms/자 · 평균 '
+                    + voice.msPerChar.toFixed(0) + 'ms/자');
+            };
+
+            speechSynthesis.speak(u);
+
+            // 지금까지 재 둔 속도가 있으면 그걸로 어림잡는다
+            return voice.msPerChar
+                ? voice.msPerChar * Array.from(text).length
+                : 0;
+        }
+
+        // Gemini 는 헤더 없는 PCM 을 준다. 그대로는 못 트니 wav 로 싼다.
+        function pcmToWav(b64, mime) {
+            const rateHit = /rate=(\d+)/.exec(mime || '');
+            const rate = rateHit ? parseInt(rateHit[1], 10) : 24000;
+
+            const raw = atob(b64);
+            const pcm = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) pcm[i] = raw.charCodeAt(i);
+
+            const buf = new ArrayBuffer(44 + pcm.length);
+            const view = new DataView(buf);
+            const put = (o, str) => {
+                for (let i = 0; i < str.length; i++) view.setUint8(o + i, str.charCodeAt(i));
+            };
+
+            put(0, 'RIFF');
+            view.setUint32(4, 36 + pcm.length, true);
+            put(8, 'WAVE');
+            put(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);        // PCM
+            view.setUint16(22, 1, true);        // 모노
+            view.setUint32(24, rate, true);
+            view.setUint32(28, rate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            put(36, 'data');
+            view.setUint32(40, pcm.length, true);
+            new Uint8Array(buf, 44).set(pcm);
+
+            const blob = new Blob([buf], { type: 'audio/wav' });
+            return URL.createObjectURL(blob);
+        }
+
+
+        function playLipSync(text, voiceMs) {
+            voiceMs = voiceMs || 0;
+
+            lipSyncQueue =
+                textToVisemes(text);
+
+
+            if (lipSyncTimer) {
+
+                clearInterval(
+                    lipSyncTimer
+                );
+
+                lipSyncTimer = null;
+            }
+
+
+            if (
+                lipSyncQueue.length === 0
+            ) {
+
+                resetTargetVowels();
+
+                return;
+            }
+
+
+            // 🚀 실시간으로 문장을 읽으며 표정을 동적으로 바꾸기 위해 원본 대사의 글자 배열을 만듭니다.
+            const textChars = Array.from(text);
+
+
+            /*
+             * 표정이 입을 살짝 벌리고 있는 경우에도
+             * 립싱크가 그 위에 추가되면서 입이 과하게
+             * 벌어지는 문제를 줄이기 위해 강도를 낮춘다.
+             */
+
+            // 입이 움직이는 속도.
+            //
+            // 기본은 글자당 0.1초다. 다만 실제로 나는 소리의 길이를
+            // 알아냈다면 그쪽에 맞춘다 — 소리는 끝났는데 입만 움직이거나
+            // 그 반대가 되지 않도록.
+            let tick = (ENTITY && ENTITY.behavior
+                && ENTITY.behavior.lipsync_tick_ms) || 100;
+
+            if (voiceMs > 0 && lipSyncQueue.length > 0) {
+                tick = Math.max(40, Math.min(260, voiceMs / lipSyncQueue.length));
+            }
+
+            // 말이 시작됐으니 입을 립싱크에 넘긴다.
+            // 표정을 다시 걸면 눈·눈썹만 남고 입이 비워진다.
+            const wasFace = currentExpression;
+            setTimeout(() => {
+                if (wasFace && isSpeaking()) applyExpression(wasFace);
+            }, 0);
+
+            lipSyncTimer = setInterval(() => {
+
+                if (
+                    lipSyncQueue.length === 0 ||
+                    isSleeping
+                ) {
+
+                    clearInterval(
+                        lipSyncTimer
+                    );
+
+                    lipSyncTimer = null;
+
+                    resetTargetVowels();
+
+                    return;
+                }
+
+
+                // 다이아가 입을 뻐끔거리며 지나가는 찰나의 '현재 글자'를 하나 가로챕니다.
+                const currentChar = textChars.shift();
+
+
+                if (currentChar) {
+                    liveTrigger(currentChar);
+                }
+
+
+                const viseme =
+                    lipSyncQueue.shift();
+
+
+                resetTargetVowels();
+
+
+                if (
+                    viseme &&
+                    Object.prototype.hasOwnProperty.call(
+                        targetVowelValues,
+                        viseme
+                    )
+                ) {
+
+                    /*
+                     * 표정이 웃는 상태일 때
+                     * 입이 이미 어느 정도 열려 있을 수 있으므로
+                     * 일반적인 립싱크보다 조금 약하게 한다.
+                     */
+
+                    // 입이 얼마나 벌어질지. 개체가 정한다.
+                    //
+                    // 예전에는 0.16~0.24 로 박아 두었는데, 그 정도면 입꼬리가
+                    // 0.4mm 움직여서 말하는지 아닌지 티가 안 났다.
+                    const L = (ENTITY && ENTITY.behavior
+                        && ENTITY.behavior.lipsync) || {};
+
+                    let baseAmount = (currentExpression === 'neutral')
+                        ? (L.amount || 0.9)
+                        : (L.amount_expressing || 0.6);
+
+                    // 말하느라 벌어지는 폭은 즐거움 표정의 입 폭을 넘지 않는다.
+                    //
+                    // 재는 것은 '말 때문에 벌어진 몫' 이다. 표정이 이미
+                    // 벌려 놓은 것까지 합치면 웃으며 말할 때 남는 몫이 0 이
+                    // 되어 입이 아예 안 움직인다.
+                    const per = (L.width_per_unit || {})[viseme] || 0;
+                    const cap = (L.width_expression || {})[L.cap_expression] || 0;
+
+                    if (per > 0 && cap > 0) {
+                        baseAmount = Math.min(baseAmount, cap / per);
+                    }
+
+                    targetVowelValues[viseme] =
+                        baseAmount +
+                        Math.random() * 0.025;
+                }
+
+            }, tick);
+        }
+
+
+
+
+        // ============================================================
+        // 립싱크 즉시 정지
+        // ============================================================
+
+        function stopLipSync() {
+
+            // 입을 멈추면 소리도 멈춘다. 안 그러면 다문 입에서 말이 난다.
+            stopVoice();
+
+            // 말이 끝났으니 입을 표정에 돌려준다
+            const face = currentExpression;
+
+
+            if (lipSyncTimer) {
+
+                clearInterval(
+                    lipSyncTimer
+                );
+
+                lipSyncTimer = null;
+            }
+
+            lipSyncQueue = [];
+            spokenTail = '';
+
+            resetTargetVowels();
+
+            // 입을 표정에 돌려준다. 말하는 동안 비워 뒀던 자리다.
+            if (face) applyExpression(face);
+        }
+
+
+        // ============================================================
+        // 메인 애니메이션
+        // ============================================================
+
+        function animate() {
+
+            requestAnimationFrame(
+                animate
+            );
+
+            const deltaTime =
+                clock.getDelta();
+
+
+            if (currentVRM) {
+
+                // 개체가 내려준 동작을 재생하고 위치를 갱신한다
+                updateMotion(deltaTime);
+                updateRoam(deltaTime);
+                updateTug(deltaTime);
+                updateBubblePos(deltaTime);
+
+
+
+                // ----------------------------------------------------
+                // 입 모양 부드러운 전환
+                // ----------------------------------------------------
+
+                if (
+                    currentVRM.blendShapeProxy
+                ) {
+
+                    const lerpSpeed =
+                        10.0 * deltaTime;
+
+
+                    [
+                        'a',
+                        'i',
+                        'u',
+                        'e',
+                        'o'
+                    ].forEach(v => {
+
+                        currentVowelValues[v] +=
+                            (
+                                targetVowelValues[v] -
+                                currentVowelValues[v]
+                            ) *
+                            Math.min(
+                                lerpSpeed,
+                                1.0
+                            );
+
+
+                        try {
+
+                            const presetName =
+                                (
+                                    THREE.VRMBlendShapePresetName &&
+                                    THREE.VRMBlendShapePresetName[
+                                        v.toUpperCase()
+                                    ]
+                                )
+                                    ? THREE.VRMBlendShapePresetName[
+                                        v.toUpperCase()
+                                    ]
+                                    : v;
+
+
+                            currentVRM
+                                .blendShapeProxy
+                                .setValue(
+                                    presetName,
+                                    currentVowelValues[v]
+                                );
+
+                        } catch (e) {}
+
+                    });
+
+
+                    currentVRM
+                        .blendShapeProxy
+                        .update();
+                }
+
+
+                if (!isSleeping) {
+
+
+                    // ------------------------------------------------
+                    // 머리 움직임
+                    // ------------------------------------------------
+
+                    try {
+
+                        const head =
+                            currentVRM.humanoid
+                                .getBoneNode(
+                                    'head'
+                                );
+
+
+                        if (head) {
+
+                            head.rotation.x =
+                                poseHeadX +
+                                Math.sin(
+                                    clock.getElapsedTime() *
+                                    2.0
+                                ) *
+                                0.02;
+                        }
+
+                    } catch (e) {}
+
+
+                    // ------------------------------------------------
+                    // 자동 눈 깜빡임
+                    // 표정 중에는 완전히 정지
+                    // ------------------------------------------------
+
+                    if (!isExpressing) {
+
+                        blinkTimer +=
+                            deltaTime;
+
+
+                        if (
+                            !isBlinking &&
+                            blinkTimer >=
+                            blinkInterval
+                        ) {
+
+                            isBlinking = true;
+
+                            blinkTimer = 0;
+
+                            blinkProgress = 0;
+                        }
+
+
+                        if (isBlinking) {
+
+                            blinkProgress +=
+                                deltaTime * 4;
+
+
+                            let blinkValue = 0;
+
+
+                            if (
+                                blinkProgress < 1.0
+                            ) {
+
+                                blinkValue =
+                                    blinkProgress;
+
+                            } else if (
+                                blinkProgress < 2.0
+                            ) {
+
+                                blinkValue =
+                                    2.0 -
+                                    blinkProgress;
+
+                            } else {
+
+                                blinkValue = 0;
+
+                                isBlinking = false;
+
+                                blinkInterval =
+                                    3 +
+                                    Math.random() * 4;
+                            }
+
+
+                            try {
+
+                                const blinkPreset =
+                                    (
+                                        THREE.VRMBlendShapePresetName &&
+                                        THREE.VRMBlendShapePresetName.Blink
+                                    )
+                                        ? THREE.VRMBlendShapePresetName.Blink
+                                        : 'blink';
+
+
+                                currentVRM
+                                    .blendShapeProxy
+                                    .setValue(
+                                        blinkPreset,
+                                        blinkValue
+                                    );
+
+
+                                currentVRM
+                                    .blendShapeProxy
+                                    .update();
+
+                            } catch (e) {}
+                        }
+                    }
+                }
+
+
+                currentVRM.update(
+                    deltaTime
+                );
+            }
+
+
+            // 옷이 걸어간 만큼 몸도 따라간다
+            followBody();
+
+            // 옷 자리는 그리기 직전에 잡는다.
+            // 자세와 위치가 다 정해진 뒤라야 부모의 matrixWorld 가 최신이다.
+            placeAllCloths();
+
+
+            renderer.render(
+                scene,
+                camera
+            );
+        }
+
+
+        animate();
+
+
+        // ============================================================
+        // DOM
+        // ============================================================
+
+        const speechBubble =
+            document.getElementById(
+                'speech-bubble'
+            );
+
+        const zzzIndicator =
+            document.getElementById(
+                'zzz-indicator'
+            );
+
+        const chatInput =
+            document.getElementById(
+                'chat-input'
+            );
+
+        const sendButton =
+            document.getElementById(
+                'send-btn'
+            );
+
+       // ============================================================
+        // 표정 이름
+        // ============================================================
+
+        const expressionNames = {
+
+            neutral: '무표정',
+
+            happy: '기쁨',
+
+            sad: '슬픔',
+
+            angry: '화남',
+
+            surprised: '놀람',
+
+            fun: '즐거움'
+        };
+
+
+        // ============================================================
+        // 표정 명령어
+        // ============================================================
+
+               // ============================================================
+        // 🎭 [유저님 전용] 다이아 고유 표정 100% 검증 테스트 명령어 엔진
+        // ============================================================
+
+        // 개체의 이름 말고 사람들이 흔히 쓰는 말들.
+        // 개체가 그 표정을 갖고 있을 때만 쓰인다.
+        const EXPRESSION_ALIASES = {
+            '무표정': 'neutral',
+            '슬퍼': 'sorrow',
+            '기뻐': 'joy',
+            '웃음': 'joy',
+            '미소': 'fun',
+            '재밌': 'joy',
+        };
+
+
+        function expressionList() {
+            // 명령으로 지을 수 있는 표정만. 윙크나 눈 감기는 눈 상태다.
+            return ((ENTITY && ENTITY.expressions) || [])
+                .filter(e => e.is_reply_emotion !== false);
+        }
+
+
+        function expressionWords() {
+            return expressionList().map(e => e.label);
+        }
+
+
+              function handleExpressionCommand(text) {
+
+            if (
+                !text.startsWith('/표정')
+            ) {
+
+                return false;
+            }
+
+
+            const command =
+                text
+                    .replace('/표정', '')
+                    .trim()
+                    .toLowerCase();
+
+
+            // 표정 이름은 개체가 가지고 있다(기쁨·즐거움·슬픔·화남·놀람·평온).
+            // 여기서 따로 이름을 들고 있으면 개체가 이름을 바꿔도 모르고,
+            // 실제로 '미소'·'웃음'처럼 어긋난 이름이 남아 있었다.
+            const expressionMap = {};
+            const expressionNames = {};
+
+            expressionList().forEach(e => {
+                expressionMap[e.key] = e.key;
+                expressionMap[String(e.label).toLowerCase()] = e.key;
+                expressionNames[e.key] = e.label;
+            });
+
+            // 개체의 이름 말고도 흔히 쓰는 말 몇 개를 더 받는다
+            Object.keys(EXPRESSION_ALIASES).forEach(word => {
+                const key = EXPRESSION_ALIASES[word];
+                if (expressionNames[key]) expressionMap[word] = key;
+            });
+
+            const expression =
+                expressionMap[command];
+
+
+            if (!expression) {
+
+                appendMessage(
+                    'ai',
+                    '지을 수 있는 표정은 ' + expressionWords().join(', ') + ' 이야.'
+                );
+
+                return true;
+            }
+
+
+            wakeUp();
+
+            resetTimers();
+
+            stopLipSync();
+
+
+            // 해당 고유 표정을 얼굴에 즉시 장착합니다.
+            applyExpression(
+                expression
+            );
+
+
+            // 화면에 깔끔하게 테스트 피드백 로그를 찍어줍니다.
+            appendMessage(
+                'ai',
+                `표정 테스트: ${expressionNames[expression]}`
+            );
+
+
+            speechBubble.innerText =
+                `표정 테스트: ${expressionNames[expression]}`;
+
+            speechBubble.style.display =
+                'block';
+
+
+            if (bubbleHideTimer) {
+
+                clearTimeout(
+                    bubbleHideTimer
+                );
+            }
+
+            if (window.expressionChangeTimer) {
+
+                clearTimeout(
+                    window.expressionChangeTimer
+                );
+            }
+
+
+            // 🚀 [유저님의 최종 공식] 놀람은 딱 1초(1000ms), 그 외 모든 감정은 3초(3000ms) 유지 후 무표정 복귀!
+            const duration =
+                (expression === 'surprised')
+                    ? 500
+                    : 3000;
+
+
+            window.expressionChangeTimer =
+                setTimeout(() => {
+
+                    applyExpression(
+                        'neutral'
+                    );
+
+                }, duration);
+
+
+            // 말풍선도 3초 뒤에 깔끔하게 닫히도록 맞춰줍니다.
+            bubbleHideTimer =
+                setTimeout(() => {
+
+                    speechBubble.style.display =
+                        'none';
+
+                }, 3000);
+
+
+            return true;
+        }
+
+
+
+
+        // ============================================================
+        // 도움말
+        // ============================================================
+
+        // ------------------------------------------------------------
+        // 기억 보관과 되찾기
+        //
+        //   /새 기억  지금까지의 기억을 옆에 치워 두고 빈 상태로 시작한다.
+        //             지우는 것이 아니라 옮기는 것이라 언제든 되찾을 수 있다.
+        //   /리셋     치워 뒀던 기억을 다시 꺼내 온다.
+        //
+        // 대화만이 아니라 관계와 호칭까지 함께 옮긴다. 대화만 지우고
+        // 친밀도가 남으면 처음 만난 사이인데 말투는 그대로인 꼴이 된다.
+        // ------------------------------------------------------------
+
+        function clearChatLog() {
+            const box = document.getElementById('chat-messages');
+            if (box) box.innerHTML = '';
+        }
+
+        function reloadChatLog() {
+            clearChatLog();
+            return fetch('/api/history')
+                .then(r => r.json())
+                .then(list => {
+                    if (!Array.isArray(list)) return;
+                    // 너무 많으면 화면이 무거워진다. 최근 것만 보인다.
+                    list.slice(-60).forEach(m => {
+                        if (!m || !m.content) return;
+                        appendMessage(m.role === 'user' ? 'user' : 'ai',
+                                      m.content);
+                    });
+                })
+                .catch(() => {});
+        }
+
+        function handleMemoryCommand(text) {
+            const t = text.replace(/\s+/g, '');
+
+            if (t !== '/새기억' && t !== '/리셋') return false;
+
+            appendMessage('user', text);
+            runMemoryCommand(t === '/새기억');
+            return true;
+        }
+
+        async function runMemoryCommand(archive) {
+            const url = archive
+                ? '/api/memory/archive'
+                : '/api/memory/restore';
+
+            try {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                });
+
+                const d = await res.json();
+
+                if (!d.ok) {
+                    appendMessage('ai', d.error || '하지 못했습니다.');
+                    return;
+                }
+
+                if (archive) {
+                    clearChatLog();
+                    appendMessage('ai',
+                        `지금까지의 기억 ${d.messages}개를 보관했습니다. `
+                        + `(${d.name})\n처음부터 다시 시작합니다. `
+                        + `/리셋 으로 되찾을 수 있습니다.`);
+                } else {
+                    await reloadChatLog();
+                    appendMessage('ai',
+                        `보관해 둔 기억 ${d.messages}개를 되찾았습니다. `
+                        + `(${d.name})`);
+                }
+
+                // 사이가 통째로 바뀌었다. 눈금과 잠긴 도구를 다시 맞춘다.
+                myAffinity = d.affinity;
+                myStageKey = d.stage;
+                affinityShown = null;      // 변화량 표시가 튀지 않게
+                buildAffinityMarks();
+                setAffinity(d.affinity, d.stage_label);
+                buildToolMenu();
+
+                applyExpression('neutral');
+                resetTimers();
+                startInactivityTimers();
+
+            } catch (e) {
+                console.warn('[diamondAI] 기억 명령 실패:', e);
+                appendMessage('ai', '기억을 다루지 못했습니다.');
+            }
+        }
+
+
+        // ------------------------------------------------------------
+        // 동작 명령
+        //
+        //   /동작 쑥스러움   또는 그냥  /쑥스러움
+        //
+        // 어떤 말이 어떤 동작인지는 개체가 안다(motion_words).
+        // 화면이 목록을 들고 있으면 동작을 늘릴 때마다 두 곳을 고쳐야 한다.
+        // ------------------------------------------------------------
+
+        function motionWords() {
+            return (ENTITY && ENTITY.relationship
+                && ENTITY.relationship.motion_words) || {};
+        }
+
+        function motionLabels() {
+            // 사람이 읽을 이름만 추린다. 영어 키는 안내에 넣지 않는다.
+            const keys = new Set((ENTITY.motions || []).map(m => m.key));
+            return Object.keys(motionWords()).filter(w => !keys.has(w));
+        }
+
+        function handleMotionCommand(text) {
+            const raw = text.trim();
+            if (raw[0] !== '/') return false;
+
+            let word = raw.slice(1).trim();
+            if (word.startsWith('동작')) word = word.slice(2).trim();
+            if (!word) return false;
+
+            const key = motionWords()[word] || motionWords()[word.toLowerCase()];
+            if (!key) return false;
+
+            appendMessage('user', text);
+
+            if (isSleeping) wakeUp();
+            faceUser();
+
+            roam.state = 'gesture';
+            playMotion(key);
+
+            const m = (ENTITY.motions || []).find(x => x.key === key);
+            appendMessage('ai', '(' + (m ? m.label : key) + ')');
+
+            return true;
+        }
+
+
+        // 배경이 여러 장일 때 다음 장으로 넘긴다.
+        function handleBackgroundCommand(text) {
+
+            if (text !== '/배경') return false;
+
+            if (!backgrounds.list.length) {
+                appendMessage('ai',
+                    'static/background/ 에 이미지를 넣으면 배경으로 깔려. '
+                    + '넣고 화면만 새로 고치면 돼.');
+                return true;
+            }
+
+            const img = nextBackground();
+
+            appendMessage('ai', img
+                ? '배경: ' + img.name
+                  + ' (' + (backgrounds.at + 1) + '/'
+                  + backgrounds.list.length + ')'
+                : '배경이 한 장뿐이야. 더 넣으면 넘길 수 있어.');
+
+            return true;
+        }
+
+
+        // 옷 끌기가 왜 안 되는지 눈으로 보는 명령.
+        // 어디서 끊기는지 알려면 화면 안의 상태를 봐야 한다.
+        function handleClothCommand(text) {
+
+            if (text !== '/옷' && text !== '/옷당기기') return false;
+
+            const counts = Object.keys(PARTS)
+                .map(k => k + ' ' + PARTS[k].length).join(', ');
+
+            const m0 = (PARTS.skirt && PARTS.skirt[0]) || null;
+
+            appendMessage('ai',
+                '옷 메시: ' + counts + ' | '
+                + '옮길 수 있는 옷: ' + cloths.length + '개 | '
+                + (m0
+                    ? '치마 첫 메시 — 떼어냄 '
+                      + (m0.bindMode === 'detached' ? 'O' : 'X')
+                      + ' · 스스로갱신 ' + (m0.matrixAutoUpdate ? '켜짐(문제)' : '꺼짐')
+                      + ' · 자리기억 ' + (m0.userData.tug ? 'O' : 'X')
+                    : '치마 메시를 못 찾았다'));
+
+            if (m0) {
+                tugCloth('skirt', 0.09, { x: 0, y: 120 });
+                setTimeout(() => {
+                    const w = new THREE.Vector3()
+                        .setFromMatrixPosition(m0.matrixWorld);
+                    appendMessage('ai',
+                        '당긴 방향 (' + tug.offset.x.toFixed(3) + ', '
+                        + tug.offset.y.toFixed(3) + ', '
+                        + tug.offset.z.toFixed(3) + ') | '
+                        + '메시 월드 자리 (' + w.x.toFixed(3) + ', '
+                        + w.y.toFixed(3) + ', ' + w.z.toFixed(3) + ')');
+                }, 200);
+            }
+
+            return true;
+        }
+
+
+        // ------------------------------------------------------------
+        // 호감도 되돌리기
+        //
+        // 기억은 그대로 두고 사이만 처음으로 돌린다.
+        // ('/새 기억'은 기억까지 치운다. 이건 사이만 건드린다.)
+        //
+        // 숫자를 붙이면 그 값으로 맞춘다 — 단계별 말투를 시험할 때 쓴다.
+        // ------------------------------------------------------------
+
+        function handleAffinityCommand(text) {
+
+            const t = text.replace(/\s+/g, '');
+
+            if (t !== '/호감초기화' && t !== '/호감리셋'
+                && !/^\/호감-?\d+$/.test(t)) {
+                return false;
+            }
+
+            const num = t.match(/-?\d+$/);
+
+            appendMessage('user', text);
+            runAffinityReset(num ? parseInt(num[0], 10) : null);
+            return true;
+        }
+
+
+        async function runAffinityReset(value) {
+
+            try {
+                const res = await fetch('/api/relationship/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(
+                        value === null ? {} : { affinity: value })
+                });
+
+                const d = await res.json();
+
+                if (!d.ok) {
+                    appendMessage('ai', d.error || '되돌리지 못했습니다.');
+                    return;
+                }
+
+                appendMessage('ai',
+                    '호감도 ' + d.before + ' → ' + d.affinity
+                    + ' (' + d.stage_label + ')'
+                    + (d.devotion_cleared
+                        ? ' · 쌓였던 순종 ' + d.devotion_cleared + '점도 비웠습니다'
+                        : ''));
+
+                // 사이가 통째로 바뀌었다. 눈금과 잠긴 도구를 다시 맞춘다.
+                myAffinity = d.affinity;
+                myStageKey = d.stage;
+                myDevotion.level = 0;
+                myDevotion.raw = 0;
+                myDevotion.label = null;
+                affinityShown = null;      // 변화량 표시가 튀지 않게
+
+                buildAffinityMarks();
+                setAffinity(d.affinity, d.stage_label);
+                buildToolMenu();
+                updateTouchZones();
+
+                applyExpression('neutral');
+
+            } catch (e) {
+                console.warn('[diamondAI] 호감도 되돌리기 실패:', e);
+                appendMessage('ai', '호감도를 되돌리지 못했습니다.');
+            }
+        }
+
+
+        // 목소리를 켜고 끈다.
+        function handleVoiceCommand(text) {
+
+            const t = text.replace(/\s+/g, '');
+            if (t !== '/목소리' && t !== '/음성') return false;
+
+            appendMessage('user', text);
+
+            voice.on = !voice.on;
+            if (!voice.on) stopVoice();
+
+            appendMessage('ai',
+                voice.on
+                    ? '목소리 켬 — ' + voice.provider
+                      + (voice.pick ? ' (' + voice.pick.name + ')' : '')
+                    : '목소리 끔');
+
+            return true;
+        }
+
+
+        function handleHelpCommand(text) {
+
+            if (
+                text !== '/도움말' &&
+                text !== '/help'
+            ) {
+
+                return false;
+            }
+
+
+            appendMessage(
+                'ai',
+                `사용 가능한 명령어:
+
+`
+                // 표정 목록은 개체에서 가져온다.
+                // 적어 두면 개체가 이름을 바꿔도 여기만 옛 이름으로 남는다.
+                + expressionWords().map(w => '/표정 ' + w).join('\n')
+                + `
+
+`
+                + motionLabels().map(w => '/' + w).join('\n')
+                + `
+
+/새 기억   지금 기억을 보관해 두고 처음부터 다시
+/리셋      보관해 둔 기억을 되찾기
+
+/배경      배경 이미지 넘기기 (static/background/ 에 넣는다)
+/목소리    소리 켜고 끄기
+
+/호감 초기화   사이를 처음으로 (기억은 그대로 둔다)
+/호감 <숫자>   그 값으로 맞추기 (예: /호감 300)
+
+/기억삭제  (되돌릴 수 없음)
+
+/도움말`
+            );
+
+
+            return true;
+        }
+
+
+        // ============================================================
+        // 기억 삭제
+        // ============================================================
+
+        async function handleMemoryDeleteCommand(text) {
+
+            if (
+                text !== '/기억삭제' &&
+                text !== '/기억 초기화'
+            ) {
+
+                return false;
+            }
+
+
+            /*
+             * 현재 Flask에 /api/memory/clear가 없다면
+             * 서버에서 404가 발생한다.
+             *
+             * 따라서 이 명령어는 Flask API를 추가한 후
+             * 실제 기억 삭제가 실행된다.
+             */
+
+            try {
+
+                const res =
+                    await fetch(
+                        '/api/memory/clear',
+                        {
+                            method: 'POST'
+                        }
+                    );
+
+
+                const data =
+                    await res.json();
+
+
+                if (res.ok) {
+
+                    appendMessage(
+                        'ai',
+                        data.message ||
+                        '기억을 초기화했어!'
+                    );
+
+                } else {
+
+                    appendMessage(
+                        'ai',
+                        data.error ||
+                        '기억 삭제에 실패했어.'
+                    );
+                }
+
+            } catch (error) {
+
+                console.error(
+                    '기억 삭제 오류:',
+                    error
+                );
+
+
+                appendMessage(
+                    'ai',
+                    '기억 삭제 서버와 연결할 수 없어.'
+                );
+            }
+
+
+            return true;
+        }
+
+
+        // ============================================================
+        // 메시지 전송
+        // ============================================================
+
+                async function sendMessage() {
+
+            if (isWaitingForAI) {
+
+                return;
+            }
+
+
+            let text =
+                chatInput.value.trim();
+
+
+            if (!text) {
+
+                return;
+            }
+
+
+            chatInput.value = '';
+
+
+            // 말을 걸었다. 돌아다니던 중이면 멈추고 이쪽을 본다.
+            faceUser();
+
+
+            // --------------------------------------------------------
+            // 명령어 처리
+            // --------------------------------------------------------
+
+            if (
+                handleExpressionCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            if (
+                handleHelpCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            if (
+                handleBackgroundCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            if (
+                handleClothCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            if (
+                handleAffinityCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            if (
+                handleVoiceCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            // 기억을 치워 두거나 되찾는다
+            if (
+                handleMemoryCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            // 가위바위보는 모델에게 묻지 않고 바로 단추를 가리킨다
+            if (
+                handleRpsCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            // /쑥스러움 처럼 동작 이름을 바로 부르는 것
+            if (
+                handleMotionCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            if (
+                await handleMemoryDeleteCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            // --------------------------------------------------------
+            // 일반 대화
+            // --------------------------------------------------------
+
+            const wasSleeping =
+                isSleeping;
+
+
+            wakeUp();
+
+            appendMessage(
+                'user',
+                text
+            );
+
+            resetTimers();
+
+
+            if (wasSleeping) {
+
+                applyExpression(
+                    'surprised'
+                );
+
+                text = text + " (상황 참고: 다이아는 자고 있다가 방금 유저가 깨워서 막 눈을 떴어. 과한 비명이나 호들갑은 절대 금지하고, 😲 이모티콘을 사용해 '어?! 왔어?' 정도로 차분하고 자연스럽게 잠에서 깨며 대화를 이어가줘.)";
+            }
+
+
+            // AI 응답 중복 요청 방지
+            isWaitingForAI = true;
+
+            sendButton.disabled = true;
+
+
+            try {
+
+                const res =
+                    await fetch(
+                        '/api/chat',
+                        {
+                            method: 'POST',
+
+                            headers: {
+                                'Content-Type':
+                                    'application/json'
+                            },
+
+                            body: JSON.stringify({
+                                message: text
+                            })
+                        }
+                    );
+
+
+                if (!res.ok) {
+
+                    throw new Error(
+                        `HTTP ${res.status}`
+                    );
+                }
+
+
+                const data =
+                    await res.json();
+
+
+                if (
+                    !data ||
+                    typeof data.reply !== 'string'
+                ) {
+
+                    throw new Error(
+                        '잘못된 API 응답'
+                    );
+                }
+
+
+                if (data.silent) {
+
+                    // 입을 닫았다. 말풍선도 립싱크도 없다.
+                    // 다만 아무 일도 안 일어나면 고장 난 것처럼 보이므로
+                    // 표정과 짧은 표시만 남긴다.
+                    showSilence(data.expression || 'angry');
+
+                } else {
+
+                    // 자다 깼으면 놀람은 스치듯 지나가고 곧 제 얼굴로 돌아온다.
+                    // 다정하게 깨웠으면 반가워하며 손을 흔든다.
+                    const wake = wasSleeping;
+
+                    // 자다 깼을 때는 깨우는 말투에 따라 갈린다.
+                    //
+                    //   다정하게  : 놀람 -> 기쁨 + 손 흔들기 + 말하기를 한꺼번에
+                    //   그냥      : 놀람 -> 무표정으로 말하고, 말을 마친 뒤 기지개
+                    //
+                    // 그냥 깨웠을 때 기지개가 뒤로 가는 이유는, 잠을 터는 일이
+                    // 대답보다 먼저 나오면 말을 걸어 놓고 기다리는 꼴이 되어서다.
+                    // 자다 깼을 때. 사이가 얼마나 깊은지로 셋으로 갈린다.
+                    //
+                    //   낮으면  놀라기만 하고 곧 대화한다.
+                    //   보통    기쁨 + 기지개로 잠을 털고 이야기를 시작한다.
+                    //   깊으면  기지개를 켠 뒤 손을 흔들며 반긴다.
+                    const wk = (ENTITY && ENTITY.behavior
+                        && ENTITY.behavior.wake) || {};
+
+                    // 호감은 이번 답변에 실려 온 값을 쓴다.
+                    //
+                    // 화면이 들고 있던 값(myAffinity)은 이 창을 띄운 뒤로
+                    // 갱신이 안 됐을 수 있다. 창을 여러 개 열어 두고 다른
+                    // 창에서 사이가 달라지면, 이 창은 옛 숫자로 판단한다.
+                    // 실제로 호감 0 인데 기지개를 켜는 일이 있었다.
+                    const aff = (data.relationship
+                        && typeof data.relationship.affinity === 'number')
+                        ? data.relationship.affinity
+                        : ((typeof myAffinity === 'number') ? myAffinity : 0);
+
+                    // 놀라는 것은 사이가 없다시피 할 때뿐이다.
+                    // 조금이라도 정이 들면 누가 깨우는지 알아서 안 놀란다.
+                    const startles = aff <= (typeof wk.surprise_upto === 'number'
+                        ? wk.surprise_upto : 0);
+
+                    // 기지개는 친구부터. 잠을 털며 일어난다.
+                    const stretches = aff >= (typeof wk.stretch_from === 'number'
+                        ? wk.stretch_from : 40);
+
+                    const warm = aff >= (typeof wk.warm_from === 'number'
+                        ? wk.warm_from : 160);
+
+                    const finalFace = wake
+                        ? (stretches ? 'joy' : 'neutral')
+                        : (data.expression || 'neutral');
+
+                    const surpriseMs = (ENTITY && ENTITY.behavior
+                        && ENTITY.behavior.wake_surprise_ms) || 420;
+
+                    if (typeof data.mood === 'number') {
+                        myMood.level = data.mood;
+                    }
+                    if (typeof data.lover === 'boolean') {
+                        myLover.yes = data.lover;
+                    }
+
+                    // 같이 걷자고 했으면 발이 풀린다. 그만하자면 멈춘다.
+                    if (data.walk === 'start') {
+                        setWalking(true);
+                    } else if (data.walk === 'stop') {
+                        setWalking(false);
+                    }
+
+                    if (wake) {
+
+                        // 자다 깼을 때는 몸이 먼저고 말이 나중이다.
+                        //
+                        //   놀랄 사이   놀람 -> 말하기
+                        //   친구 이상   기지개 -> 말하기
+                        //   사랑 이상   기지개 -> 손인사하면서 말하기
+                        //
+                        // 잠은 털고 나서 말한다. 말부터 해 놓고 기지개를 켜면
+                        // 말해 놓고 딴짓하는 꼴이 된다.
+                        // 다만 인사는 말과 함께 간다 — 사람은 손을 흔들면서 말한다.
+                        if (startles) applyExpression('surprised');
+
+                        const talk = (face) => {
+                            showReply(data.reply, face || finalFace, data.cues);
+                        };
+
+                        const wave = () => {
+                            if (!warm) { talk('joy'); return; }
+
+                            // 손을 흔들면서 말을 시작한다.
+                            //
+                            // 흔들기를 다 마치고 입을 여는 것보다,
+                            // 손이 올라가는 동안 말이 나오는 쪽이 자연스럽다.
+                            // 사람은 인사하면서 말한다.
+                            roam.state = 'gesture';
+                            playMotion('wave');
+                            talk('fun');
+                        };
+
+                        setTimeout(() => {
+
+                            if (!stretches) {
+                                applyExpression(finalFace);
+                                talk();
+                                return;
+                            }
+
+
+                            // 기지개를 켤 때는 기쁨으로 못박는다.
+                            // 놀란 얼굴로 몸을 펴지 않게 하려는 것이다.
+                            applyExpression('joy');
+                            roam.state = 'gesture';
+                            playMotion('stretch');
+
+                            const st = motionByKey('stretch');
+                            setTimeout(wave, (st ? st.duration : 2.8) * 1000);
+
+                        }, startles ? surpriseMs : 0);
+
+                    } else {
+                        showReply(data.reply, finalFace, data.cues);
+                    }
+
+                    // 괄호로 만졌다면 몸도 그에 맞게 움직인다
+                    if (data.motion) {
+                        roam.state = 'gesture';
+                        playMotion(data.motion);
+                    }
+                }
+
+
+                // 말 한마디에도 사이는 움직인다. 눈금에 반영한다.
+                if (data.relationship &&
+                    typeof data.relationship.affinity === 'number') {
+
+                    myAffinity = data.relationship.affinity;
+                    myStageKey = data.relationship.stage || myStageKey;
+
+                    setAffinity(
+                        data.relationship.affinity,
+                        data.relationship.label
+                    );
+
+                    buildToolMenu();
+                }
+
+
+            } catch (err) {
+
+                console.error(
+                    "채팅 API 호출 오류:",
+                    err
+                );
+
+
+                appendMessage(
+                    'ai',
+                    '앗, AI 서버와 연결이 안 됐어. 잠시 후 다시 말해줘!'
+                );
+
+
+            } finally {
+
+                isWaitingForAI = false;
+
+                sendButton.disabled = false;
+
+            }
+        }
+
+
+        // ============================================================
+        // 깨우기
+        // ============================================================
+
+        function wakeUp() {
+
+            isSleeping = false;
+
+            zzzIndicator.style.display =
+                'none';
+
+            setEyeState(false);
+
+            resetToAttentionPose();
+        }
+
+
+        // ============================================================
+        // AI 응답 표시
+        // ============================================================
+
+                                function showReply(
+            reply,
+            expression,
+            cues
+        ) {
+
+            appendMessage(
+                'ai',
+                reply
+            );
+
+
+            speechBubble.innerText =
+                reply;
+
+            speechBubble.style.display =
+                'block';
+
+
+            // 1글자당 0.1초 동적 타임라인 계산
+            const totalSeconds = Math.max(reply.length, 30);
+
+
+            applyExpression(
+                expression
+            );
+
+
+            // 소리를 내고, 그 길이에 입을 맞춘다.
+            //
+            // 브라우저 목소리는 미리 길이를 알 수 없어 0 이 온다.
+            // 그때는 지금까지처럼 글자 수로 어림잡는다.
+            speak(reply).then(ms => playLipSync(reply, ms));
+
+
+            // 서버가 걷어낸 이모지·괄호를 그 자리에서 표정과 몸짓으로 되살린다.
+            //
+            // 되돌아갈 얼굴은 평온이 아니라 '이 답변의 얼굴'이다.
+            // 문장 중간에 째려봤다고 해서 그 뒤가 무표정일 이유는 없다.
+            // 말하는 길이도 넘겨준다 — 말이 끝나기도 전에 얼굴이 꺼지면
+            // 문장 뒤쪽이 무표정으로 흘러간다.
+            playCues(cues, expression, reply.length);
+
+
+            if (bubbleHideTimer) {
+                clearTimeout(bubbleHideTimer);
+            }
+            if (window.expressionChangeTimer) {
+                clearTimeout(window.expressionChangeTimer);
+            }
+
+
+            // 🚀 [유저님의 최종 공식] 놀람은 딱 0.5초(0.5000ms), 그 외 감정들은 2초(2000ms) 유지 후 무표정 전환!
+            if (totalSeconds > 3 && expression !== 'neutral') {
+                const duration = (expression === 'surprised') ? 1000 : 3000;
+                
+                window.expressionChangeTimer = setTimeout(() => {
+                    applyExpression('neutral');
+                }, duration);
+            }
+
+
+            bubbleHideTimer =
+                setTimeout(() => {
+
+                    speechBubble.style.display =
+                        'none';
+
+                    stopLipSync();
+
+                    applyExpression(
+                        'neutral'
+                    );
+
+                }, totalSeconds * 100); // 1글자 = 0.2초 싱크 유지
+
+
+            startInactivityTimers();
+        }
+
+
+
+
+        // ============================================================
+        // 채팅 메시지 추가 (유저님의 소중한 원본 로직을 100% 보존합니다)
+        // ============================================================
+
+        function appendMessage(
+            role,
+            text
+        ) {
+
+            const chatMessages =
+                document.getElementById(
+                    'chat-messages'
+                );
+
+
+            const msgDiv =
+                document.createElement(
+                    'div'
+                );
+
+
+            msgDiv.className =
+                `msg ${
+                    role === 'user'
+                        ? 'user-msg'
+                        : 'ai-msg'
+                }`;
+
+
+            msgDiv.innerText =
+                text;
+
+
+            chatMessages.appendChild(
+                msgDiv
+            );
+
+
+            chatMessages.scrollTop =
+                chatMessages.scrollHeight;
+        }
+
+
+        // ============================================================
+        // 비활동 타이머
+        // ============================================================
+
+        // 기다리는 시간도 개체가 정한다. 이 파일이 숫자를 들고 있지 않는다.
+        function behaviorSec(key, fallback) {
+            const b = (ENTITY && ENTITY.behavior) || {};
+            const v = b[key];
+            return (typeof v === 'number' && v > 0) ? v : fallback;
+        }
+
+
+        function startInactivityTimers() {
+
+            resetTimers();
+
+            // 조용해지면 다이아가 먼저 말을 건다.
+            talkTimer = setTimeout(() => {
+
+                if (isSleeping || isWaitingForAI) return;
+
+                // 잠들기 타이머는 firstTalk 이 말을 마친 뒤에 건다.
+                // showReply 가 끝에서 startInactivityTimers 를 다시 부르므로,
+                // 여기서 미리 걸어두면 그때 지워진다.
+                firstTalk();
+
+            }, behaviorSec('first_talk_timeout_sec', 120) * 1000);
+        }
+
+
+        // ============================================================
+        // 먼저 말 걸기
+        //
+        // 무슨 말을 거는지는 사이가 얼마나 깊은지에 달렸다.
+        // 그 문장은 서버가 단계별로 들고 있으므로 여기서 정하지 않는다.
+        // 화면이 문장을 쥐고 있으면 단계가 바뀌어도 같은 말만 하게 된다.
+        // ============================================================
+
+        async function firstTalk() {
+
+            try {
+
+                const res = await fetch('/api/first-talk');
+
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+
+                const data = await res.json();
+
+                // 원수 단계처럼 먼저 걸 말이 없는 사이면 조용히 넘어간다
+                if (data.speak && data.reply) {
+
+                    showReply(
+                        data.reply,
+                        data.expression || 'neutral',
+                        data.cues
+                    );
+                }
+
+                // 한동안 조용했다는 뜻이다. 이제 돌아다녀도 된다.
+                mayRoam = true;
+
+            } catch (e) {
+
+                // 못 불러왔다고 아무 문장이나 대신 내보내면
+                // 지금 사이와 어긋난 말이 나온다. 차라리 가만히 있는다.
+                console.warn(
+                    '[diamondAI] 먼저 말 걸기 실패, 이번엔 건너뜁니다.',
+                    e
+                );
+
+            } finally {
+
+                // 기다리는 사이에 상대가 말을 걸었다면 그쪽이 우선이다.
+                // 그때는 답변이 오면서 타이머가 다시 걸린다.
+                if (!isSleeping && !isWaitingForAI) {
+                    armSleepTimer();
+                }
+            }
+        }
+
+
+        // ============================================================
+        // 잠들기 타이머
+        //
+        // 먼저 말을 걸었는데도 대답이 없으면 잠든다.
+        // 한 번 걸었으면 또 걸지 않으므로 말 걸기 타이머는 여기서 끈다.
+        // ============================================================
+
+        function armSleepTimer() {
+
+            if (talkTimer) {
+                clearTimeout(talkTimer);
+                talkTimer = null;
+            }
+
+            if (sleepTimer) {
+                clearTimeout(sleepTimer);
+                sleepTimer = null;
+            }
+
+            // 잠들지 않는 단계가 있다. 상대가 조용해도 눈을 감지 않는다.
+            //
+            // 대신 다시 말을 건다. firstTalk 이 끝나면 이 함수를 또 부르니
+            // 대답이 올 때까지 혼자 말이 이어진다.
+            const s = curStage();
+
+            if (s && s.never_sleeps) {
+
+                sleepTimer = setTimeout(() => {
+
+                    if (isSleeping || isWaitingForAI) return;
+
+                    firstTalk();
+
+                }, behaviorSec('nudge_timeout_sec', 45) * 1000);
+
+                return;
+            }
+
+            sleepTimer = setTimeout(() => {
+
+                if (isSleeping || isWaitingForAI) return;
+
+                goToSleep();
+
+            }, behaviorSec('sleep_timeout_sec', 120) * 1000);
+        }
+
+
+        // ============================================================
+        // 타이머 초기화
+        // ============================================================
+
+        function resetTimers() {
+
+            if (talkTimer) {
+
+                clearTimeout(
+                    talkTimer
+                );
+
+                talkTimer = null;
+            }
+
+
+            if (sleepTimer) {
+
+                clearTimeout(
+                    sleepTimer
+                );
+
+                sleepTimer = null;
+            }
+        }
+
+
+        // ============================================================
+        // 잠들기
+        // ============================================================
+
+        function goToSleep() {
+
+            isSleeping = true;
+
+            zzzIndicator.style.display =
+                'block';
+
+            speechBubble.style.display =
+                'none';
+
+
+            stopLipSync();
+
+            // 표정을 먼저 지우고 눈을 감긴다.
+            // 순서가 반대면 applyExpression 이 감긴 눈을 도로 지운다.
+            applyExpression(
+                'neutral'
+            );
+
+            setEyeState(true);
+        }
+
+
+        // ============================================================
+        // Enter 키
+        // ============================================================
+
+        chatInput.addEventListener(
+            'keydown',
+            (event) => {
+
+                if (
+                    event.key === 'Enter'
+                ) {
+
+                    event.preventDefault();
+
+                    sendMessage();
+                }
+            }
+        );
+
+
+        // ============================================================
+        // 전송 버튼
+        // ============================================================
+
+        sendButton.addEventListener(
+            'click',
+            sendMessage
+        );
+
+
+        // ============================================================
+        // 화면 크기 변경
+        // ============================================================
+
+        window.addEventListener(
+            'resize',
+            () => {
+
+                camera.aspect =
+                    canvas.clientWidth /
+                    canvas.clientHeight;
+
+                camera.updateProjectionMatrix();
+
+
+                renderer.setSize(
+                    canvas.clientWidth,
+                    canvas.clientHeight
+                );
+            }
+        );
+
+
+        // ============================================================
+        // 아바타 시작
+        // ============================================================
+
+        loadAvatar(
+            '/static/avatar.vrm'
+        );
+
+    </script>
+
+</body>
+</html>

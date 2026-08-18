@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>다이아 개체 시험대</title>
+
+<script src="https://unpkg.com/three@0.137.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.137.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+
+<style>
+:root{
+  --bg:#0e1014; --panel:#151922; --panel2:#1c212c; --sunken:#0a0c10;
+  --ink:#e6e9ef; --ink2:#a4acbb; --muted:#6e7788;
+  --line:#252b37; --line2:#1b202a;
+  --accent:#4dd4ac; --accent-ink:#07211a;
+  --move:#7aa2f7; --warn:#e0a44a; --danger:#e2685f; --link:#6ea8fe;
+  --mono:'JetBrains Mono','Cascadia Mono',Consolas,'D2Coding',monospace;
+  --ui:'Pretendard','Malgun Gothic','맑은 고딕',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);
+  font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+button,input,textarea,select{font-family:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+a{color:var(--link)}
+
+.top{display:flex;align-items:center;gap:12px;padding:0 16px;height:52px;
+  background:var(--panel);border-bottom:1px solid var(--line);
+  position:sticky;top:0;z-index:20;flex-wrap:wrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none}
+.title{font-weight:700;font-size:14.5px;white-space:nowrap}
+.sub{font-size:12px;color:var(--muted);white-space:nowrap}
+.spacer{flex:1}
+.tag{font-family:var(--mono);font-size:10.5px;padding:2px 7px;border-radius:3px;
+  border:1px solid var(--line);color:var(--ink2);white-space:nowrap}
+.tag.ok{color:var(--accent);border-color:var(--accent)}
+.tag.warn{color:var(--warn);border-color:var(--warn)}
+.tag.move{color:var(--move);border-color:var(--move)}
+
+.page{max-width:1500px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+.grid{display:grid;gap:16px;grid-template-columns:minmax(0,420px) minmax(0,1fr)}
+@media (max-width:1080px){.grid{grid-template-columns:minmax(0,1fr)}}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.card>h2{margin:0;padding:11px 14px;font-size:12px;font-weight:700;letter-spacing:.04em;
+  background:var(--panel2);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.card>h2 .n{font-family:var(--mono);color:var(--accent);font-size:11px}
+.card>h2 .spacer{flex:1}
+.body{padding:14px;display:flex;flex-direction:column;gap:12px}
+
+.kv{display:grid;grid-template-columns:96px minmax(0,1fr);gap:6px 12px;font-size:13px}
+.kv dt{color:var(--muted);font-size:12px}
+.kv dd{margin:0;word-break:break-word}
+.kv dd.mono,.mono{font-family:var(--mono)}
+
+/* ---------- 무대 ---------- */
+.stagewrap{position:relative;background:linear-gradient(180deg,#1b2030 0%,#0a0d13 70%);
+  border-radius:10px;overflow:hidden;height:min(56vh,520px);min-height:340px;border:1px solid var(--line)}
+.stagewrap canvas{display:block;width:100%;height:100%}
+.overlay{position:absolute;display:flex;gap:6px;flex-wrap:wrap;z-index:3}
+.ov-tl{top:12px;left:12px;max-width:60%}
+.ov-tr{top:12px;right:12px}
+.ov-bl{bottom:12px;left:12px}
+.ov-br{bottom:12px;right:12px;flex-direction:column;align-items:flex-end;gap:4px}
+.hud{font-family:var(--mono);font-size:10.5px;color:var(--ink2);
+  background:rgba(10,13,19,.78);padding:4px 8px;border-radius:4px;border:1px solid var(--line)}
+.hud b{color:var(--accent)}
+.hud.move b{color:var(--move)}
+
+.row{display:flex;flex-wrap:wrap;gap:6px}
+.btn{height:30px;padding:0 11px;font-size:12.5px;font-weight:600;cursor:pointer;
+  background:var(--panel2);border:1px solid var(--line);border-radius:6px}
+.btn:hover{border-color:var(--muted)}
+.btn.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.blue.on{background:var(--move);border-color:var(--move);color:#06121f}
+.btn.ghost{background:rgba(10,13,19,.78)}
+/* .ghost 가 뒤에 오므로 선택 상태를 다시 이겨줘야 한다 (어두운 글자/어두운 배경 방지) */
+.btn.ghost.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ghost.blue.on{background:var(--move);border-color:var(--move);color:#06121f}
+.btn.mini{height:25px;padding:0 8px;font-size:11.5px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.expbtn{display:flex;flex-direction:column;align-items:flex-start;gap:1px;height:auto;padding:6px 10px;min-width:92px}
+.expbtn .k{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.expbtn.on .k{color:var(--accent-ink)}
+.expbtn small{font-size:9.5px;color:var(--muted)}
+.expbtn.on small{color:var(--accent-ink);opacity:.8}
+
+.pre{font-family:var(--mono);font-size:11.5px;line-height:1.6;background:var(--sunken);
+  border:1px solid var(--line2);border-radius:7px;padding:11px 12px;white-space:pre-wrap;
+  word-break:break-word;max-height:340px;overflow:auto;margin:0;color:var(--ink2)}
+.pre mark{background:rgba(77,212,172,.16);color:var(--accent);border-radius:2px;padding:0 1px}
+
+.field{display:flex;flex-direction:column;gap:5px}
+.label{font-size:11.5px;color:var(--muted)}
+.input,.ta{width:100%;background:var(--sunken);border:1px solid var(--line);border-radius:7px;
+  padding:9px 11px;font-size:13px}
+.ta{font-family:var(--mono);font-size:12px;min-height:64px;resize:vertical}
+.input:focus,.ta:focus{border-color:var(--accent);outline:none}
+.slider{width:100%;accent-color:var(--move)}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line2);vertical-align:top}
+th{font-size:11px;color:var(--muted);font-weight:600;background:var(--panel2)}
+td.mono,th.mono{font-family:var(--mono);font-size:11.5px}
+tr:last-child td{border-bottom:0}
+.scrollx{overflow-x:auto}
+
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{font-family:var(--mono);font-size:12px;padding:2px 7px;border-radius:4px;
+  background:var(--panel2);border:1px solid var(--line)}
+.chip.hit{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.chip.conflict{border-color:var(--warn);color:var(--warn)}
+
+.alert{display:flex;gap:10px;padding:11px 12px;border-radius:8px;font-size:12.5px;line-height:1.6;
+  background:rgba(224,164,74,.09);border:1px solid var(--warn);color:#f0c98a}
+.alert.bad{background:rgba(226,104,95,.09);border-color:var(--danger);color:#f2a49e}
+.alert b{color:var(--warn)}
+.alert.bad b{color:var(--danger)}
+
+.log{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow:auto}
+.msg{padding:8px 11px;border-radius:8px;font-size:13px;max-width:88%}
+.msg.me{align-self:flex-end;background:var(--panel2);border:1px solid var(--line)}
+.msg.ai{align-self:flex-start;background:var(--sunken);border:1px solid var(--line2)}
+.msg .meta{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:3px}
+
+.timeline{display:flex;flex-wrap:wrap;gap:3px;font-family:var(--mono);font-size:12px}
+.tc{padding:2px 4px;border-radius:3px;border:1px solid transparent;white-space:pre}
+.tc.fire{border-color:var(--accent);color:var(--accent);font-weight:700}
+.muted{color:var(--muted);font-size:12px}
+.hr{height:1px;background:var(--line2);margin:2px 0}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <span class="dot"></span>
+  <span class="title">다이아 개체 시험대</span>
+  <span class="sub">페르소나 + 아바타 = 하나의 객체</span>
+  <span class="spacer"></span>
+  <span class="tag" id="tagLoad">불러오는 중…</span>
+  <span class="tag" id="tagConflict"></span>
+  <span class="tag" id="tagRel">관계 —</span>
+  <a class="tag" href="/" target="_blank">운영 화면 열기 ↗</a>
+</div>
+
+<div class="page">
+
+  <!-- ============ 무대 ============ -->
+  <div class="card">
+    <h2><span class="n">01</span> 무대<span class="spacer"></span>
+      <span class="tag" id="tagVrm">VRM 대기</span>
+      <span class="tag" id="tagMotion">—</span></h2>
+    <div class="body" style="padding:12px">
+      <div class="stagewrap" id="stage">
+        <div class="overlay ov-tl">
+          <button class="btn ghost blue" id="btnRoam">자유 행동 시작</button>
+          <button class="btn ghost" data-motion="wave">손인사</button>
+          <button class="btn ghost" data-motion="nod">끄덕임</button>
+          <button class="btn ghost" data-motion="shy">쑥스러워</button>
+          <button class="btn ghost" id="btnComeHere">이리 와</button>
+          <button class="btn ghost" id="btnStop">멈춤</button>
+        </div>
+        <div class="overlay ov-tr">
+          <button class="btn ghost mini on" data-cam="wide">전신</button>
+          <button class="btn ghost mini" data-cam="face">얼굴</button>
+          <button class="btn ghost mini" data-cam="follow">따라가기</button>
+        </div>
+        <div class="overlay ov-bl">
+          <span class="hud" id="hudState">상태 <b>—</b></span>
+          <span class="hud" id="hudPos">위치 —</span>
+        </div>
+        <div class="overlay ov-br">
+          <span class="hud" id="hudExp">표정 <b>neutral</b></span>
+          <span class="hud" id="hudFps">-- fps</span>
+        </div>
+      </div>
+      <div class="row">
+        <span class="muted" style="flex:1">
+          동작·기준자세·이동 수치는 전부 <span class="mono">/api/avatar</span> 가 내려준 값입니다.
+          이 페이지는 자체 포즈 데이터를 갖고 있지 않습니다.
+        </span>
+      </div>
+      <div class="row" style="align-items:center;gap:12px">
+        <span class="label" style="width:74px">걷는 속도</span>
+        <input class="slider" id="spd" type="range" min="0.15" max="1.2" step="0.01" style="flex:1;max-width:260px">
+        <span class="mono muted" id="spdV">—</span>
+        <span class="label" style="width:74px;margin-left:12px">배회 반경</span>
+        <input class="slider" id="rad" type="range" min="0.3" max="2.2" step="0.05" style="flex:1;max-width:260px">
+        <span class="mono muted" id="radV">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- ============ 왼쪽 ============ -->
+    <div class="col">
+
+      <div class="card">
+        <h2><span class="n">02</span> 개체 정보<span class="spacer"></span>
+          <span class="tag">GET /api/avatar</span></h2>
+        <div class="body">
+          <dl class="kv" id="kvIdentity"></dl>
+          <div class="hr"></div>
+          <dl class="kv" id="kvBehavior"></dl>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2><span class="n">03</span> 표정<span class="spacer"></span>
+          <span class="tag" id="tagShape">—</span></h2>
+        <div class="body">
+          <div class="row" id="expButtons"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2><span class="n">04</span> 동작 정의</h2>
+        <div class="body">
+          <div class="scrollx">
+            <table id="motionTable">
+              <thead><tr>
+                <th>동작</th><th class="mono">key</th><th class="mono">길이</th>
+                <th>반복</th><th>표정</th><th class="mono">키</th>
+              </tr></thead><tbody></tbody>
+            </table>
+          </div>
+          <div class="muted">키에 적히지 않은 본은 <span class="mono">base_pose</span> 를 따릅니다.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ============ 오른쪽 ============ -->
+    <div class="col">
+
+      <div class="card">
+        <h2><span class="n">05</span> 표정 정의 한눈에 보기</h2>
+        <div class="body">
+          <div id="conflictBox"></div>
+          <div class="scrollx">
+            <table id="expTable">
+              <thead><tr>
+                <th>표정</th><th class="mono">key</th><th>블렌드셰이프</th>
+                <th>답변 전체 감정 신호</th><th>말하는 중 전환 신호</th><th class="mono">유지</th>
+              </tr></thead><tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2><span class="n">06</span> 페르소나 프롬프트<span class="spacer"></span>
+          <span class="tag" id="tagPrompt"></span></h2>
+        <div class="body">
+          <div class="row">
+            <button class="btn on" id="btnPlain">운영과 동일</button>
+            <button class="btn" id="btnGuide">표정 안내문 포함</button>
+          </div>
+          <div class="muted" id="promptNote"></div>
+          <pre class="pre" id="promptOut">불러오는 중…</pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2><span class="n">07</span> 감정 판단 시험<span class="spacer"></span>
+          <span class="tag">Ollama 없이 동작</span></h2>
+        <div class="body">
+          <div class="field">
+            <span class="label">문장을 넣으면 서버 판단과 말하는 중 전환을 함께 보여줍니다</span>
+            <textarea class="ta" id="detectIn">오늘 진짜 재밌었어 ㅋㅋ 근데 좀 아쉽다 🥺</textarea>
+          </div>
+          <div class="row">
+            <button class="btn on" id="btnDetect">판단하기</button>
+            <button class="btn ghost mini" data-sample="ㅋㅋㅋ 완전 좋아 🥰">예시: 웃음</button>
+            <button class="btn ghost mini" data-sample="헐 대박 😲 진짜?">예시: 놀람</button>
+            <button class="btn ghost mini" data-sample="아 짜증나 💢 화나">예시: 화남</button>
+          </div>
+          <div id="detectOut"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2><span class="n">08</span> 대화 시험<span class="spacer"></span>
+          <span class="tag">POST /api/chat · Ollama 필요</span></h2>
+        <div class="body">
+          <div class="log" id="chatLog">
+            <div class="muted">여기서 보낸 대화도 운영 화면과 같은 기억(memory_store.json)에 쌓입니다.
+              답변 감정에 따라 다이아가 표정을 짓고 손인사 같은 몸짓도 합니다.</div>
+          </div>
+          <div class="field"><input class="input" id="chatIn" placeholder="다이아에게 말 걸기…"></div>
+          <div class="row">
+            <button class="btn on" id="btnSend">보내기</button>
+            <button class="btn ghost" id="btnHistory">기억 불러오기</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+var $ = function(id){ return document.getElementById(id); };
+var esc = function(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); };
+var clamp = function(v,a,b){ return v<a?a:(v>b?b:v); };
+var DEG = Math.PI/180;
+
+var AVATAR = null, currentVRM = null;
+var surprisedShapeName = null, allShapeNames = [];
+var holdTimer = null;
+
+// ============================================================
+// 개체 불러오기
+// ============================================================
+
+async function loadEntity(){
+  var res = await fetch("/api/avatar");
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  AVATAR = await res.json();
+
+  $("tagLoad").textContent = AVATAR.name + " · 표정 " + AVATAR.expressions.length +
+                             " · 동작 " + AVATAR.motions.length;
+  $("tagLoad").className = "tag ok";
+
+  var id = AVATAR.identity, L = AVATAR.locomotion;
+  $("kvIdentity").innerHTML =
+    row("이름", AVATAR.name) + row("식별자", mono(AVATAR.id)) + row("성별", id.gender) +
+    row("생년월일", id.birth_year+"년 "+id.birth_month+"월 "+id.birth_day+"일") +
+    row("나이", id.age + "세 <span class='muted'>(생년월일에서 계산)</span>") +
+    row("정체성", id.role) +
+    row("모델", mono(AVATAR.model.vrm + "  (VRM " + AVATAR.model.vrm_spec + ")"));
+
+  var b = AVATAR.behavior;
+  $("kvBehavior").innerHTML =
+    row("잠들기", b.sleep_timeout_sec+"초") + row("립싱크", b.lipsync_tick_ms+"ms / 글자") +
+    row("눈깜빡임", b.blink_min_sec+"~"+b.blink_max_sec+"초") +
+    row("걸음", mono(L.walk_speed+" m/s · 회전 "+L.turn_speed+" rad/s")) +
+    row("배회", mono("반경 "+L.roam_radius+"m · 쉬는 "+L.idle_min_sec+"~"+L.idle_max_sec+"초"));
+
+  roam.speed = L.walk_speed;
+  roam.radius = L.roam_radius;
+  $("spd").value = roam.speed; $("spdV").textContent = roam.speed.toFixed(2)+" m/s";
+  $("rad").value = roam.radius; $("radV").textContent = roam.radius.toFixed(2)+" m";
+
+  buildExpressionButtons(); buildExpressionTable(); buildConflicts(); buildMotionTable();
+}
+
+function row(k,v){ return "<dt>"+k+"</dt><dd>"+v+"</dd>"; }
+function mono(v){ return "<span class='mono'>"+esc(v)+"</span>"; }
+
+// ============================================================
+// 표정 UI
+// ============================================================
+
+function pairs(o){
+  var k = Object.keys(o||{});
+  return k.length ? k.map(function(n){ return n+" "+o[n]; }).join(", ") : "";
+}
+function shapeText(e){
+  if (e.auto_detect) return "자동탐색("+e.auto_detect+") "+e.auto_weight+" · 없으면 "+pairs(e.fallback_blendshapes);
+  return pairs(e.blendshapes) || "—";
+}
+function buildExpressionButtons(){
+  var host = $("expButtons"); host.innerHTML = "";
+  AVATAR.expressions.forEach(function(e){
+    var b = document.createElement("button");
+    b.className = "btn expbtn"; b.dataset.key = e.key;
+    b.innerHTML = "<span>"+esc(e.label)+"</span><span class='k'>"+esc(e.key)+"</span>" +
+                  (e.is_reply_emotion ? "" : "<small>연출 전용</small>");
+    b.addEventListener("click", function(){ showExpression(e.key, true); });
+    host.appendChild(b);
+  });
+}
+function buildExpressionTable(){
+  var tb = $("expTable").querySelector("tbody"); tb.innerHTML = "";
+  var cf = {}; (AVATAR.conflicts||[]).forEach(function(c){ cf[c.token]=1; });
+  AVATAR.expressions.forEach(function(e){
+    var tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td>"+esc(e.label)+(e.is_reply_emotion?"":" <span class='muted'>(연출)</span>")+"</td>"+
+      "<td class='mono'>"+esc(e.key)+"</td>"+
+      "<td class='mono'>"+esc(shapeText(e))+"</td>"+
+      "<td>"+chips(e.reply_emoji,cf)+"</td>"+
+      "<td>"+chips(e.live_triggers,cf)+"</td>"+
+      "<td class='mono'>"+(e.hold_ms?e.hold_ms+"ms":"—")+"</td>";
+    tb.appendChild(tr);
+  });
+}
+function chips(list,cf){
+  if (!list||!list.length) return "<span class='muted'>—</span>";
+  return "<div class='chips'>"+list.map(function(t){
+    return "<span class='chip"+(cf[t]?" conflict":"")+"'>"+esc(t)+"</span>"; }).join("")+"</div>";
+}
+function buildConflicts(){
+  var c = AVATAR.conflicts||[], box = $("conflictBox");
+  if (!c.length){ box.innerHTML=""; $("tagConflict").textContent="정의 충돌 없음"; $("tagConflict").className="tag ok"; return; }
+  $("tagConflict").textContent = "정의 충돌 "+c.length+"건"; $("tagConflict").className = "tag warn";
+  box.innerHTML = "<div class='alert'><div><b>같은 신호가 서로 다른 표정을 가리킵니다 — "+c.length+"건</b><br>"+
+    "합치기 전 두 곳에 흩어져 있던 정의가 원래 어긋나 있었습니다. 임의로 한쪽을 지우지 않고 그대로 보존했습니다.<br><br>"+
+    c.map(function(x){ return "<span class='chip conflict'>"+esc(x.token)+"</span> 답변 전체는 <b>"+
+      esc(x.reply_expression.join(","))+"</b>, 말하는 중에는 <b>"+esc(x.live_expression.join(","))+"</b>"; }).join("<br>")+
+    "</div></div>";
+}
+function buildMotionTable(){
+  var tb = $("motionTable").querySelector("tbody"); tb.innerHTML = "";
+  AVATAR.motions.forEach(function(m){
+    var tr = document.createElement("tr");
+    tr.innerHTML = "<td>"+esc(m.label)+"<div class='muted'>"+esc(m.description||"")+"</div></td>"+
+      "<td class='mono'>"+esc(m.key)+"</td>"+
+      "<td class='mono'>"+m.duration.toFixed(1)+"s</td>"+
+      "<td>"+(m.loop?"반복":"1회")+(m.locomotes?" <span class='muted'>· 이동</span>":"")+"</td>"+
+      "<td class='mono'>"+(m.expression||"—")+"</td>"+
+      "<td class='mono'>"+m.keys.length+"</td>";
+    tb.appendChild(tr);
+  });
+}
+
+// ============================================================
+// 3D
+// ============================================================
+
+var scene, camera, renderer, clock, floorGroup;
+var camMode = "wide";
+
+var CAMS = {
+  wide:   { pos:[0, 1.05, 3.4], look:[0, 0.62, 0], fov:30 },
+  face:   { pos:[0, 1.18, 1.55], look:[0, 1.12, 0], fov:26 },
+  follow: { pos:[0, 1.05, 2.6], look:[0, 0.70, 0], fov:30 }
+};
+
+function initThree(){
+  var stage = $("stage");
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0a0d13, 3.0, 7.5);
+
+  camera = new THREE.PerspectiveCamera(30, 1, 0.1, 30);
+  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+  stage.appendChild(renderer.domElement);
+
+  var dir = new THREE.DirectionalLight(0xffffff, 1.0);
+  dir.position.set(1, 2, 2).normalize(); scene.add(dir);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.62));
+
+  // 바닥 — 이동이 눈에 보이게
+  floorGroup = new THREE.Group();
+  var g = new THREE.GridHelper(8, 32, 0x2e3852, 0x1b2233);
+  g.material.transparent = true; g.material.opacity = 0.75;
+  floorGroup.add(g);
+  floorGroup.position.y = AVATAR.locomotion.ground_y;
+  scene.add(floorGroup);
+
+  // 배회 반경 표시
+  roamRing = new THREE.Mesh(
+    new THREE.RingGeometry(AVATAR.locomotion.roam_radius-0.01, AVATAR.locomotion.roam_radius+0.01, 64),
+    new THREE.MeshBasicMaterial({ color:0x7aa2f7, transparent:true, opacity:0.35, side:THREE.DoubleSide })
+  );
+  roamRing.rotation.x = -Math.PI/2;
+  roamRing.position.y = AVATAR.locomotion.ground_y + 0.002;
+  scene.add(roamRing);
+
+  // 발밑 그림자
+  var c = document.createElement("canvas"); c.width = c.height = 128;
+  var cx = c.getContext("2d");
+  var grd = cx.createRadialGradient(64,64,0,64,64,64);
+  grd.addColorStop(0,"rgba(0,0,0,0.55)"); grd.addColorStop(1,"rgba(0,0,0,0)");
+  cx.fillStyle = grd; cx.fillRect(0,0,128,128);
+  shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.55,0.55),
+    new THREE.MeshBasicMaterial({ map:new THREE.CanvasTexture(c), transparent:true, depthWrite:false }));
+  shadow.rotation.x = -Math.PI/2;
+  shadow.position.y = AVATAR.locomotion.ground_y + 0.004;
+  scene.add(shadow);
+
+  clock = new THREE.Clock();
+  applyCam("wide"); resize();
+  window.addEventListener("resize", resize);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
+
+  var loader = new THREE.GLTFLoader();
+  loader.crossOrigin = "anonymous";
+  loader.load(AVATAR.model.vrm, function(gltf){
+    if (THREE.VRMUtils) { try { THREE.VRMUtils.removeUnnecessaryJoints(gltf.scene); } catch(e){} }
+    THREE.VRM.from(gltf).then(function(vrm){
+      currentVRM = vrm;
+      scene.add(vrm.scene);
+      detectSurprised(gltf);
+      collectShapeNames();
+      cacheBones();
+      $("tagVrm").textContent = "VRM 로드 완료"; $("tagVrm").className = "tag ok";
+      playMotion("idle");
+      showExpression("neutral", false);
+    }).catch(vrmFail);
+  }, undefined, vrmFail);
+
+  tick();
+}
+var roamRing = null, shadow = null;
+
+function vrmFail(e){
+  $("tagVrm").textContent = "VRM 로드 실패"; $("tagVrm").className = "tag warn";
+  if (window.console) console.error(e);
+}
+function resize(){
+  var s = $("stage"); if (!renderer) return;
+  var w = s.clientWidth, h = s.clientHeight; if (!w||!h) return;
+  camera.aspect = w/h; camera.updateProjectionMatrix(); renderer.setSize(w,h,false);
+}
+function applyCam(mode){
+  camMode = mode;
+  Array.prototype.forEach.call(document.querySelectorAll("[data-cam]"), function(b){
+    b.classList.toggle("on", b.dataset.cam === mode);
+  });
+  var c = CAMS[mode];
+  camera.fov = c.fov; camera.updateProjectionMatrix();
+  camera.position.fromArray(c.pos);
+  camera.lookAt(new THREE.Vector3().fromArray(c.look));
+}
+Array.prototype.forEach.call(document.querySelectorAll("[data-cam]"), function(b){
+  b.addEventListener("click", function(){ applyCam(b.dataset.cam); });
+});
+
+function detectSurprised(gltf){
+  try{
+    var ext = gltf && gltf.userData && gltf.userData.gltfExtensions && gltf.userData.gltfExtensions.VRM;
+    var groups = ext && ext.blendShapeMaster && ext.blendShapeMaster.blendShapeGroups;
+    if (!Array.isArray(groups)) return;
+    var names = groups.map(function(g){ return g && (g.name || g.presetName); }).filter(Boolean);
+    var norm = function(v){ return String(v).toLowerCase().replace(/[\s_-]/g,""); };
+    var want = ["surprised","surprise","odoroki","놀람"];
+    var found = names.find(function(n){ return want.indexOf(norm(n))>=0; });
+    if (!found) found = names.find(function(n){ return norm(n).indexOf("surpris")>=0; });
+    if (found) surprisedShapeName = found;
+  }catch(e){}
+}
+function collectShapeNames(){
+  var set = {};
+  AVATAR.expressions.forEach(function(e){
+    Object.keys(e.blendshapes||{}).forEach(function(n){ set[n]=1; });
+    Object.keys(e.fallback_blendshapes||{}).forEach(function(n){ set[n]=1; });
+  });
+  if (surprisedShapeName) set[surprisedShapeName]=1;
+  allShapeNames = Object.keys(set);
+}
+
+function showExpression(key, hold){
+  var e = null;
+  AVATAR.expressions.forEach(function(x){ if (x.key===key) e = x; });
+  if (!e) return;
+  $("hudExp").innerHTML = "표정 <b>"+esc(e.key)+"</b>";
+  Array.prototype.forEach.call(document.querySelectorAll(".expbtn"), function(b){
+    b.classList.toggle("on", b.dataset.key===key);
+  });
+  var shapes = e.blendshapes||{};
+  if (e.auto_detect){
+    if (surprisedShapeName){ shapes = {}; shapes[surprisedShapeName] = e.auto_weight; }
+    else shapes = e.fallback_blendshapes||{};
+  }
+  $("tagShape").textContent = Object.keys(shapes).length
+    ? Object.keys(shapes).map(function(n){ return n+"="+shapes[n]; }).join(" ") : "모두 0";
+
+  if (currentVRM && currentVRM.blendShapeProxy){
+    var proxy = currentVRM.blendShapeProxy;
+    try{
+      allShapeNames.forEach(function(n){ try{ proxy.setValue(n,0.0); }catch(x){} });
+      Object.keys(shapes).forEach(function(n){ try{ proxy.setValue(n,shapes[n]); }catch(x){} });
+      proxy.update();
+    }catch(x){}
+  }
+  if (holdTimer){ clearTimeout(holdTimer); holdTimer=null; }
+  if (hold && e.hold_ms>0 && key!=="neutral"){
+    holdTimer = setTimeout(function(){ showExpression("neutral", false); }, e.hold_ms);
+  }
+}
+
+// ============================================================
+// 동작 재생기
+//
+// 클립은 절대 자세로 적혀 있고, 클립이 언급하지 않은 본은 base_pose 를 쓴다.
+// 클립이 바뀔 때는 이전 자세에서 짧게 넘어간다.
+// ============================================================
+
+var BONES = [
+  "hips","spine","chest","upperChest","neck","head",
+  "leftShoulder","leftUpperArm","leftLowerArm","leftHand",
+  "rightShoulder","rightUpperArm","rightLowerArm","rightHand",
+  "leftUpperLeg","leftLowerLeg","leftFoot",
+  "rightUpperLeg","rightLowerLeg","rightFoot"
+];
+var boneNodes = {};
+
+function cacheBones(){
+  boneNodes = {};
+  if (!currentVRM || !currentVRM.humanoid) return;
+  BONES.forEach(function(n){
+    var node = null;
+    try { node = currentVRM.humanoid.getBoneNode(n); } catch(e){}
+    if (node) boneNodes[n] = node;
+  });
+}
+
+var EASE = {
+  linear:function(u){ return u; },
+  easeIn:function(u){ return u*u; },
+  easeOut:function(u){ return 1-(1-u)*(1-u); },
+  easeInOut:function(u){ return u*u*(3-2*u); }
+};
+
+var player = { motion:null, time:0, done:true, from:null, blend:1, blendDur:0.22 };
+
+function motionByKey(k){
+  var m = null; AVATAR.motions.forEach(function(x){ if (x.key===k) m = x; }); return m;
+}
+
+function samplePose(m, t){
+  var keys = m.keys, pose = {};
+  Object.keys(AVATAR.base_pose).forEach(function(n){ pose[n] = AVATAR.base_pose[n].slice(); });
+
+  var a = keys[0], b = keys[0], u = 0;
+  if (t <= keys[0].t) { a = b = keys[0]; }
+  else if (t >= keys[keys.length-1].t) { a = b = keys[keys.length-1]; }
+  else {
+    for (var i=0;i<keys.length-1;i++){
+      if (t >= keys[i].t && t < keys[i+1].t){
+        a = keys[i]; b = keys[i+1]; u = (t-a.t)/(b.t-a.t); break;
+      }
+    }
+  }
+  var e = (EASE[m.ease]||EASE.easeInOut)(u);
+
+  m.channels.forEach(function(n){
+    var base = AVATAR.base_pose[n] || [0,0,0];
+    var ra = (a.bones && a.bones[n]) || base;
+    var rb = (b.bones && b.bones[n]) || base;
+    pose[n] = [ra[0]+(rb[0]-ra[0])*e, ra[1]+(rb[1]-ra[1])*e, ra[2]+(rb[2]-ra[2])*e];
+  });
+  return pose;
+}
+
+function currentPose(){
+  if (!player.motion) {
+    var p = {};
+    Object.keys(AVATAR.base_pose).forEach(function(n){ p[n] = AVATAR.base_pose[n].slice(); });
+    return p;
+  }
+  return samplePose(player.motion, player.time);
+}
+
+function playMotion(key, opts){
+  var m = motionByKey(key); if (!m) return;
+  opts = opts || {};
+  player.from = currentPose();
+  player.blend = 0;
+  player.motion = m;
+  player.time = 0;
+  player.done = false;
+  $("tagMotion").textContent = m.label + " (" + m.key + ")";
+  $("tagMotion").className = "tag " + (m.locomotes ? "move" : "ok");
+  if (m.expression && !opts.keepExpression) showExpression(m.expression, true);
+}
+
+function updateMotion(dt){
+  if (!player.motion) return;
+  player.time += dt;
+  if (player.time >= player.motion.duration){
+    if (player.motion.loop) player.time = player.time % player.motion.duration;
+    else { player.time = player.motion.duration; player.done = true; }
+  }
+  if (player.blend < 1) player.blend = Math.min(1, player.blend + dt/player.blendDur);
+
+  var pose = samplePose(player.motion, player.time);
+
+  if (player.from && player.blend < 1){
+    var w = EASE.easeInOut(player.blend), out = {};
+    var names = {};
+    Object.keys(pose).forEach(function(n){ names[n]=1; });
+    Object.keys(player.from).forEach(function(n){ names[n]=1; });
+    Object.keys(names).forEach(function(n){
+      var base = AVATAR.base_pose[n] || [0,0,0];
+      var f = player.from[n] || base, tg = pose[n] || base;
+      out[n] = [f[0]+(tg[0]-f[0])*w, f[1]+(tg[1]-f[1])*w, f[2]+(tg[2]-f[2])*w];
+    });
+    pose = out;
+  }
+
+  // base_pose 에 있으나 이번 프레임에 없는 본은 기준 자세로 되돌린다
+  Object.keys(AVATAR.base_pose).forEach(function(n){
+    if (!(n in pose)) pose[n] = AVATAR.base_pose[n];
+  });
+
+  Object.keys(pose).forEach(function(n){
+    var node = boneNodes[n]; if (!node) return;
+    var r = pose[n];
+    node.rotation.set(r[0]*DEG, r[1]*DEG, r[2]*DEG);
+  });
+}
+
+// ============================================================
+// 돌아다니기
+// ============================================================
+
+var roam = {
+  on:false, state:"idle", x:0, z:0, yaw:0, targetX:0, targetZ:0,
+  wait:0, speed:0.42, radius:1.15, phase:0
+};
+
+function pickTarget(){
+  for (var i=0;i<12;i++){
+    var ang = Math.random()*Math.PI*2;
+    var r = roam.radius * (0.35 + Math.random()*0.65);
+    var tx = Math.cos(ang)*r, tz = Math.sin(ang)*r;
+    if (Math.hypot(tx-roam.x, tz-roam.z) > 0.35){ roam.targetX = tx; roam.targetZ = tz; return; }
+  }
+  roam.targetX = 0; roam.targetZ = 0;
+}
+
+function angleDiff(a,b){
+  var d = (b-a) % (Math.PI*2);
+  if (d > Math.PI) d -= Math.PI*2;
+  if (d < -Math.PI) d += Math.PI*2;
+  return d;
+}
+
+function setState(s){
+  roam.state = s;
+  var kr = { idle:"가만히", move:"걷는 중", gesture:"몸짓", manual:"수동" };
+  $("hudState").innerHTML = "상태 <b>"+(kr[s]||s)+"</b>";
+  $("hudState").className = "hud" + (s==="move" ? " move" : "");
+}
+
+function updateRoam(dt){
+  var L = AVATAR.locomotion;
+
+  if (roam.state === "gesture"){
+    if (player.done) { setState("idle"); roam.wait = rand(L.idle_min_sec, L.idle_max_sec); playMotion("idle"); }
+  }
+  else if (roam.on && roam.state === "idle"){
+    roam.wait -= dt;
+    // 쉬는 동안 카메라 쪽으로 몸을 돌린다
+    if (L.face_camera_on_idle){
+      roam.yaw += clamp(angleDiff(roam.yaw, 0), -L.turn_speed*dt, L.turn_speed*dt);
+    }
+    if (roam.wait <= 0){
+      if (Math.random() < L.gesture_chance){
+        var pool = L.gesture_pool || [];
+        var pick = pool[(Math.random()*pool.length)|0];
+        if (pick){ setState("gesture"); playMotion(pick); return; }
+      }
+      pickTarget(); setState("move"); playMotion("walk");
+    }
+  }
+  else if (roam.state === "move"){
+    var dx = roam.targetX - roam.x, dz = roam.targetZ - roam.z;
+    var dist = Math.hypot(dx, dz);
+
+    if (dist <= L.arrive_dist){
+      setState("idle");
+      roam.wait = rand(L.idle_min_sec, L.idle_max_sec);
+      playMotion("idle");
+    } else {
+      var want = Math.atan2(dx, dz);
+      var diff = angleDiff(roam.yaw, want);
+      roam.yaw += clamp(diff, -L.turn_speed*dt, L.turn_speed*dt);
+
+      // 방향이 어긋나 있으면 그만큼 천천히 나아간다
+      var align = Math.max(0, Math.cos(angleDiff(roam.yaw, want)));
+      var step = Math.min(roam.speed * dt * align, dist);
+      roam.x += Math.sin(roam.yaw) * step;
+      roam.z += Math.cos(roam.yaw) * step;
+      roam.phase += dt / player.motion.duration;
+    }
+  }
+
+  applyRoot();
+}
+
+function rand(a,b){ return a + Math.random()*(b-a); }
+
+function applyRoot(){
+  if (!currentVRM) return;
+  var L = AVATAR.locomotion;
+  var bob = (roam.state === "move")
+    ? Math.abs(Math.sin(roam.phase * Math.PI * 2)) * L.bob_height : 0;
+
+  currentVRM.scene.position.set(roam.x, L.ground_y + bob, roam.z);
+  currentVRM.scene.rotation.y = Math.PI + roam.yaw;
+
+  if (shadow) shadow.position.set(roam.x, L.ground_y + 0.004, roam.z);
+
+  $("hudPos").textContent =
+    "위치 x " + roam.x.toFixed(2) + "  z " + roam.z.toFixed(2) +
+    "  방향 " + Math.round(((roam.yaw*180/Math.PI)%360+360)%360) + "°";
+
+  if (camMode === "follow"){
+    var c = CAMS.follow;
+    camera.position.set(c.pos[0] + roam.x*0.55, c.pos[1], c.pos[2] + roam.z*0.55);
+    camera.lookAt(roam.x*0.8, c.look[1], roam.z*0.8);
+  }
+}
+
+// ============================================================
+// 조작
+// ============================================================
+
+$("btnRoam").addEventListener("click", function(){
+  roam.on = !roam.on;
+  this.classList.toggle("on", roam.on);
+  this.textContent = roam.on ? "자유 행동 중지" : "자유 행동 시작";
+  if (roam.on){
+    if (roam.state === "manual") { setState("idle"); roam.wait = 0.4; playMotion("idle"); }
+  } else {
+    setState("manual");
+  }
+});
+
+Array.prototype.forEach.call(document.querySelectorAll("[data-motion]"), function(b){
+  b.addEventListener("click", function(){
+    roam.on = false;
+    $("btnRoam").classList.remove("on");
+    $("btnRoam").textContent = "자유 행동 시작";
+    setState("gesture");
+    playMotion(b.dataset.motion);
+  });
+});
+
+$("btnComeHere").addEventListener("click", function(){
+  roam.on = false;
+  $("btnRoam").classList.remove("on");
+  $("btnRoam").textContent = "자유 행동 시작";
+  roam.targetX = 0; roam.targetZ = 0.55;   // 카메라 쪽으로
+  setState("move"); playMotion("walk");
+});
+
+$("btnStop").addEventListener("click", function(){
+  roam.on = false;
+  $("btnRoam").classList.remove("on");
+  $("btnRoam").textContent = "자유 행동 시작";
+  setState("manual"); playMotion("idle");
+});
+
+$("spd").addEventListener("input", function(){
+  roam.speed = parseFloat(this.value); $("spdV").textContent = roam.speed.toFixed(2)+" m/s";
+});
+$("rad").addEventListener("input", function(){
+  roam.radius = parseFloat(this.value); $("radV").textContent = roam.radius.toFixed(2)+" m";
+  if (roamRing){
+    roamRing.geometry.dispose();
+    roamRing.geometry = new THREE.RingGeometry(roam.radius-0.01, roam.radius+0.01, 64);
+  }
+});
+
+// ============================================================
+// 루프
+// ============================================================
+
+var frames = 0, fpsAcc = 0;
+
+function tick(){
+  requestAnimationFrame(tick);
+  var dt = Math.min(clock.getDelta(), 0.05);
+
+  frames++; fpsAcc += dt;
+  if (fpsAcc >= 0.5){ $("hudFps").textContent = Math.round(frames/fpsAcc)+" fps"; frames=0; fpsAcc=0; }
+
+  if (currentVRM){
+    updateMotion(dt);
+    updateRoam(dt);
+
+    // 1회성 동작이 끝나면 가만히로 돌아간다
+    if (player.done && player.motion && !player.motion.loop && roam.state !== "gesture"){
+      playMotion("idle");
+    }
+    try { currentVRM.update(dt); } catch(e){}
+  }
+  renderer.render(scene, camera);
+}
+
+// ============================================================
+// 페르소나 프롬프트
+// ============================================================
+
+var promptCache = {};
+async function loadPrompt(guide){
+  var key = guide ? "1" : "0";
+  if (!promptCache[key]){
+    var r = await fetch("/api/avatar/prompt?guide="+key);
+    promptCache[key] = (await r.json()).prompt;
+  }
+  var plain = promptCache["0"] || "", text = promptCache[key];
+  $("tagPrompt").textContent = text.length+"자";
+  $("btnPlain").classList.toggle("on", !guide);
+  $("btnGuide").classList.toggle("on", guide);
+  if (guide && plain && text.indexOf(plain)===0){
+    var extra = text.slice(plain.length);
+    $("promptOut").innerHTML = esc(plain)+"<mark>"+esc(extra)+"</mark>";
+    $("promptNote").textContent = "표시된 부분이 아바타가 자기 표정 목록으로 직접 만들어 붙인 "+extra.trim().length+"자입니다. 운영에는 들어가지 않습니다.";
+  } else {
+    $("promptOut").textContent = text;
+    $("promptNote").textContent = "지금 운영 중인 /api/chat 이 실제로 쓰는 문장과 같습니다.";
+  }
+}
+$("btnPlain").addEventListener("click", function(){ loadPrompt(false); });
+$("btnGuide").addEventListener("click", function(){ loadPrompt(true); });
+
+// ============================================================
+// 감정 판단 시험
+// ============================================================
+
+function liveTimeline(text){
+  return Array.from(text).map(function(ch){
+    var hit = null;
+    AVATAR.expressions.forEach(function(e){
+      if (!hit && (e.live_triggers||[]).indexOf(ch)>=0) hit = e;
+    });
+    return { ch:ch, hit:hit };
+  });
+}
+$("btnDetect").addEventListener("click", runDetect);
+Array.prototype.forEach.call(document.querySelectorAll("[data-sample]"), function(b){
+  b.addEventListener("click", function(){ $("detectIn").value = b.dataset.sample; runDetect(); });
+});
+
+async function runDetect(){
+  var text = $("detectIn").value, box = $("detectOut");
+  box.innerHTML = "<div class='muted'>판단 중…</div>";
+  var r = await fetch("/api/expression/detect", {
+    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text:text}) });
+  var d = await r.json();
+  var tl = liveTimeline(text), fired = tl.filter(function(t){ return t.hit; });
+
+  var html = "<dl class='kv'>"+
+    row("서버 판단","<span class='chip hit'>"+esc(d.expression)+"</span> <span class='muted'>답변 전체를 훑어 고른 하나</span>")+
+    row("말하는 중", fired.length ? fired.map(function(f){
+      return "<span class='chip hit'>"+esc(f.ch)+" → "+esc(f.hit.key)+" ("+f.hit.hold_ms+"ms)</span>"; }).join(" ")
+      : "<span class='muted'>전환 없음</span>")+
+    "</dl><div class='label' style='margin-top:8px'>글자 타임라인 ("+AVATAR.behavior.lipsync_tick_ms+"ms 간격)</div>"+
+    "<div class='timeline'>"+tl.map(function(t){
+      return "<span class='"+(t.hit?"tc fire":"tc")+"' title='"+(t.hit?esc(t.hit.key):"")+"'>"+
+             (t.ch===" "?"␣":esc(t.ch))+"</span>"; }).join("")+"</div>";
+
+  if (d.expression!=="neutral" && fired.length){
+    var last = fired[fired.length-1].hit.key;
+    if (last !== d.expression){
+      html += "<div class='alert' style='margin-top:10px'><div>말을 마쳤을 때 얼굴에 남는 표정은 <b>"+
+        esc(last)+"</b> 인데, 서버가 답변 감정으로 정한 값은 <b>"+esc(d.expression)+
+        "</b> 입니다. 위 정의 충돌이 실제로 드러나는 지점입니다.</div></div>";
+    }
+  }
+  box.innerHTML = html;
+  if (d.expression) showExpression(d.expression, false);
+}
+
+// ============================================================
+// 대화 시험
+// ============================================================
+
+function addMsg(who, text, meta){
+  var log = $("chatLog"), d = document.createElement("div");
+  d.className = "msg "+who;
+  d.innerHTML = "<div>"+esc(text)+"</div>"+(meta?"<div class='meta'>"+esc(meta)+"</div>":"");
+  log.appendChild(d); log.scrollTop = log.scrollHeight;
+}
+
+// 서버가 걷어낸 표시를 그 자리에서 되살린다.
+// 글자 하나당 lipsync_tick_ms 만큼 지나간다고 보고 시각을 잡는다.
+var cueTimers = [];
+function playCues(cues){
+  cueTimers.forEach(clearTimeout);
+  cueTimers = [];
+  var tick = AVATAR.behavior.lipsync_tick_ms || 100;
+  (cues || []).forEach(function(c){
+    cueTimers.push(setTimeout(function(){
+      if (c.type === "expression") showExpression(c.key, true);
+      else if (c.type === "motion" && roam.state !== "move"){
+        setState("gesture");
+        playMotion(c.key, { keepExpression:true });
+      }
+    }, (c.at || 0) * tick));
+  });
+}
+
+function showRelationship(rel){
+  if (!rel) return;
+  var t = $("tagRel");
+  t.textContent = "관계 " + (rel.label || rel.stage) +
+    (rel.affinity !== undefined ? " (" + rel.affinity + ")" : "");
+  t.className = "tag " + (
+    rel.stage === "hostile" || rel.stage === "cold" ? "warn"
+    : (rel.stage === "friend" || rel.stage === "close" ? "ok" : "")
+  );
+}
+
+async function send(){
+  var v = $("chatIn").value.trim(); if (!v) return;
+  $("chatIn").value = ""; addMsg("me", v); $("btnSend").disabled = true;
+  try{
+    var r = await fetch("/api/chat", { method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:v}) });
+    var d = await r.json();
+
+    var meta = "expression: " + (d.expression || "-");
+    if (d.cues && d.cues.length){
+      meta += " · 표시 " + d.cues.map(function(c){
+        return c.key + "@" + c.at; }).join(", ");
+    }
+    if (d.relationship){
+      meta += " · " + d.relationship.label;
+      if (d.relationship.changed_from){
+        meta += " (" + d.relationship.changed_from + "에서 바뀜)";
+      }
+    }
+    addMsg("ai", d.reply || d.error || "(빈 응답)", meta);
+
+    if (d.expression) showExpression(d.expression, true);
+    playCues(d.cues);
+    if (d.relationship) fetch("/api/relationship").then(function(x){ return x.json(); }).then(showRelationship);
+
+  }catch(e){ addMsg("ai","요청 실패: "+e.message); }
+  finally{ $("btnSend").disabled = false; }
+}
+$("btnSend").addEventListener("click", send);
+$("chatIn").addEventListener("keydown", function(e){ if (e.key==="Enter") send(); });
+
+$("btnHistory").addEventListener("click", async function(){
+  var r = await fetch("/api/history"), h = await r.json(), log = $("chatLog");
+  log.innerHTML = "";
+  if (!Array.isArray(h) || !h.length){ log.innerHTML = "<div class='muted'>저장된 대화가 없습니다.</div>"; return; }
+  h.slice(-30).forEach(function(m){ addMsg(m.role==="user"?"me":"ai", m.content||""); });
+});
+
+// ============================================================
+// 시작
+// ============================================================
+
+loadEntity()
+  .then(function(){ setState("manual"); initThree(); return loadPrompt(false); })
+  .then(function(){
+    return fetch("/api/relationship")
+      .then(function(r){ return r.json(); })
+      .then(showRelationship)
+      .catch(function(){});
+  })
+  .catch(function(e){
+    $("tagLoad").textContent = "개체 로드 실패"; $("tagLoad").className = "tag warn";
+    document.querySelector(".page").insertAdjacentHTML("afterbegin",
+      "<div class='alert bad'><div><b>/api/avatar 를 불러오지 못했습니다</b><br>"+esc(e.message)+"</div></div>");
+  });
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>픽셀창</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: #14162a;
+            color: #e6e7f2;
+            font-family: 'Malgun Gothic', system-ui, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            padding: 24px;
+        }
+
+        h1 { font-size: 16px; margin: 0; font-weight: normal; }
+
+        .note {
+            font-size: 12px; color: #8f93b8; line-height: 1.8;
+            text-align: center;
+        }
+
+        .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+        button, select {
+            background: #2a2f52; color: #dfe1f0; border: 1px solid #3a3f68;
+            border-radius: 6px; padding: 7px 12px; font-size: 12px;
+            cursor: pointer; font-family: inherit;
+        }
+        button:hover { background: #353b68; }
+
+        /* 픽셀판.
+           선이 흐려지지 않게 image-rendering 을 픽셀로 못박는다.
+           안 그러면 확대할 때 브라우저가 부드럽게 뭉갠다. */
+        #board {
+            display: grid;
+            background: #3a3f68;
+            gap: 1px;
+            padding: 1px;
+            border-radius: 4px;
+            user-select: none;
+            touch-action: none;
+        }
+
+        .px {
+            background: #ffffff;
+            width: 18px;
+            height: 18px;
+        }
+        .px.on { background: #000000; }
+
+        #count { font-size: 12px; color: #8f93b8; }
+    </style>
+</head>
+<body>
+
+<h1>픽셀창</h1>
+
+<div class="note">
+    한 번 누르면 검게, 다시 누르면 희게 돌아온다.<br>
+    끌면 처음 누른 색으로 이어서 칠해진다. 오른쪽 단추는 언제나 지운다.
+</div>
+
+<div class="bar">
+    <label class="note">칸 수</label>
+    <select id="size">
+        <option value="8">8 x 8</option>
+        <option value="16" selected>16 x 16</option>
+        <option value="24">24 x 24</option>
+        <option value="32">32 x 32</option>
+        <option value="48">48 x 48</option>
+    </select>
+
+    <label class="note">칸 크기</label>
+    <select id="zoom">
+        <option value="10">작게</option>
+        <option value="18" selected>보통</option>
+        <option value="28">크게</option>
+    </select>
+
+    <button onclick="clearAll()">전부 지우기</button>
+    <button onclick="fillAll()">전부 칠하기</button>
+    <button onclick="invert()">뒤집기</button>
+</div>
+
+<div id="board"></div>
+
+<div id="count">검은 칸 0개</div>
+
+<script>
+// ============================================================
+// 픽셀창
+//
+// 칸 하나가 픽셀 하나다. 한 번 누르면 검게, 다시 누르면 희게.
+// 끌면 처음 누른 색으로 이어서 칠해진다.
+//
+// 칸을 <div> 로 만든다. 캔버스에 그리면 좌표를 칸으로 되돌리는
+// 계산이 따로 필요한데, 칸마다 물체를 두면 누른 칸이 곧 그 칸이다.
+// 48 x 48 = 2304 개까지는 이 방식으로 충분히 가볍다.
+// ============================================================
+
+const board = document.getElementById('board');
+const sizeSel = document.getElementById('size');
+const zoomSel = document.getElementById('zoom');
+const countEl = document.getElementById('count');
+
+// 끄는 중인가. 누른 채 지나가는 칸을 칠하려면 이걸 봐야 한다.
+let painting = false;
+
+// 칠하는 색.
+//
+// 누른 칸이 희면 검게, 검으면 희게 — 한 번 누르면 검고 다시 누르면 돌아온다.
+// 그 판단은 누르는 순간 한 번만 하고, 끄는 동안에는 그 색을 유지한다.
+// 지나가는 칸마다 뒤집으면 끌 때 얼룩덜룩해진다.
+let painting_on = true;
+
+function build() {
+    const n = parseInt(sizeSel.value, 10);
+    const z = parseInt(zoomSel.value, 10);
+
+    board.innerHTML = '';
+    board.style.gridTemplateColumns = `repeat(${n}, ${z}px)`;
+
+    for (let i = 0; i < n * n; i++) {
+        const c = document.createElement('div');
+        c.className = 'px';
+        c.style.width = z + 'px';
+        c.style.height = z + 'px';
+        board.appendChild(c);
+    }
+
+    tally();
+}
+
+function paint(cell, on) {
+    if (!cell || !cell.classList.contains('px')) return;
+    cell.classList.toggle('on', on);
+    tally();
+}
+
+function tally() {
+    countEl.textContent =
+        '검은 칸 ' + board.querySelectorAll('.px.on').length + '개';
+}
+
+// 누르기 — 왼쪽은 누른 칸의 반대색, 오른쪽은 언제나 지움
+board.addEventListener('pointerdown', (e) => {
+    if (!e.target.classList.contains('px')) return;
+
+    e.preventDefault();
+    painting = true;
+
+    // 오른쪽 단추는 언제나 지운다.
+    // 왼쪽 단추는 누른 칸의 반대색이 된다.
+    painting_on = (e.button === 2)
+        ? false
+        : !e.target.classList.contains('on');
+
+    paint(e.target, painting_on);
+    board.setPointerCapture(e.pointerId);
+});
+
+// 끌기 — 지나간 칸을 이어서 칠한다.
+//
+// 칸에 직접 pointermove 를 걸면 안 된다. 처음 누른 칸이 포인터를
+// 붙잡고 있어서 다른 칸으로 사건이 가지 않는다.
+// 그래서 좌표로 지금 어느 칸 위인지 찾아본다.
+board.addEventListener('pointermove', (e) => {
+    if (!painting) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    paint(el, painting_on);
+});
+
+['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => {
+    board.addEventListener(ev, () => { painting = false; });
+});
+
+// 오른쪽 단추로 지울 수 있게 메뉴는 막는다
+board.addEventListener('contextmenu', (e) => e.preventDefault());
+
+function clearAll() {
+    board.querySelectorAll('.px').forEach(c => c.classList.remove('on'));
+    tally();
+}
+
+function fillAll() {
+    board.querySelectorAll('.px').forEach(c => c.classList.add('on'));
+    tally();
+}
+
+function invert() {
+    board.querySelectorAll('.px').forEach(c => c.classList.toggle('on'));
+    tally();
+}
+
+sizeSel.onchange = build;
+zoomSel.onchange = build;
+
+build();
+</script>
+
+</body>
+</html>
