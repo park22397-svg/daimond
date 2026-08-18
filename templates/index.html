@@ -3690,7 +3690,11 @@
 
             stopVoice();
 
-            if (voice.provider === 'gemini') {
+            // 서버가 만들어 주는 목소리면 받아서 튼다.
+            //
+            // edge 는 mp3 를 그대로 주므로 바로 틀 수 있고,
+            // gemini 는 헤더 없는 PCM 이라 wav 로 싸야 한다.
+            if (voice.provider !== 'browser') {
                 try {
                     const d = await fetch('/api/tts', {
                         method: 'POST',
@@ -3699,14 +3703,27 @@
                     }).then(r => r.json());
 
                     if (d.ok && d.audio) {
-                        const wav = pcmToWav(d.audio, d.mime);
-                        const a = new Audio(wav);
+                        const mime = d.mime || '';
+                        const src = mime.indexOf('L16') >= 0
+                            ? pcmToWav(d.audio, mime)
+                            : 'data:' + (mime || 'audio/mpeg')
+                              + ';base64,' + d.audio;
+
+                        const a = new Audio(src);
                         voice.audio = a;
-                        await a.play().catch(() => {});
-                        return await new Promise(res => {
-                            a.onloadedmetadata = () => res(a.duration * 1000);
-                            setTimeout(() => res(0), 400);
+
+                        // 소리 길이를 알아야 입을 맞출 수 있다.
+                        // 다 읽히기를 기다렸다가 튼다 — 그래야 길이가 나온다.
+                        const ms = await new Promise(res => {
+                            a.onloadedmetadata = () => {
+                                res(isFinite(a.duration) ? a.duration * 1000 : 0);
+                            };
+                            a.onerror = () => res(0);
+                            setTimeout(() => res(0), 1500);
                         });
+
+                        a.play().catch(() => {});
+                        return ms;
                     }
                 } catch (e) {
                     console.warn('[diamondAI] 서버 목소리 실패, 브라우저로', e);

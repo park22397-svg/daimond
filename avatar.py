@@ -398,6 +398,17 @@ class TouchTool:
     def lines_for(self, zone_key):
         return self.lines.get(zone_key) or self.lines.get("default")
 
+    def label_for(self, zone_key):
+        """그 자리에서 이 도구를 뭐라고 부르는가.
+
+        같은 손가락이라도 어디에 닿느냐에 따라 다른 것이 된다.
+        자리마다 적어 두지 않았으면 본디 이름을 쓴다.
+        """
+        spec = self.lines.get(zone_key)
+        if isinstance(spec, dict) and spec.get("label"):
+            return spec["label"]
+        return self.label
+
     def to_dict(self):
         return {
             "key": self.key,
@@ -515,8 +526,16 @@ class VirtualAvatar:
 
         if bone == "head" and local:
             cut = self.touch.get("head_split", {})
+
             if local[1] >= cut.get("top_y", 0.13):
                 return self.touch_zone("head")
+
+            # 입은 얼굴 안에서 다시 가른다.
+            # 눈보다 아래이고, 앞쪽이고, 가운데일 때다.
+            mouth = self.touch_zone("mouth")
+            if mouth is not None                     and local[1] <= cut.get("mouth_y", -0.005)                     and local[2] <= cut.get("mouth_z", -0.05)                     and abs(local[0]) <= cut.get("mouth_x", 0.05):
+                return mouth
+
             if local[2] <= cut.get("front_z", -0.02):
                 return self.touch_zone("face")
             return self.touch_zone("head")
@@ -1036,7 +1055,7 @@ class VirtualAvatar:
             "silent": zone.silent,
             "affinity_to": drop_to,
             "tool": tool.key if tool else None,
-            "tool_label": tool.label if tool else None,
+            "tool_label": tool.label_for(zone.key) if tool else None,
             "kind": kind,
             "allowed": allowed,
             "reply": reply,
@@ -4212,7 +4231,20 @@ DIA = VirtualAvatar(
             "front_z": -0.01,
         },
 
-        "head_split": {"top_y": 0.13, "front_z": -0.02},
+        # 머리를 정수리·얼굴·입으로 가른다.
+        #
+        # 머리 본 하나가 다 걸치고 있어서 닿은 자리의 좌표로 나눈다.
+        # 실측 (머리 본 기준):
+        #   입   y -0.030 ~ +0.066   z -0.105 ~ -0.061
+        #   눈   y -0.013 ~ +0.104
+        # 눈과 겹치는 구간이 있어 입은 눈보다 확실히 아래로 잡는다.
+        "head_split": {
+            "top_y": 0.13,
+            "front_z": -0.02,
+            "mouth_y": -0.005,
+            "mouth_z": -0.05,
+            "mouth_x": 0.05,
+        },
 
         # 이만큼 가까워지면 만졌을 때 놀라는 대신 웃는다.
         # 자리마다 expression_warm 을 적어 둔 곳에만 걸린다.
@@ -4439,6 +4471,27 @@ DIA = VirtualAvatar(
                     "belly": {
                         "polite": ["앗! 거기 찌르면 간지러워요."],
                         "casual": ["앗! 거기 찌르면 간지럽다니까."],
+                    },
+
+                    # 두 자리에서는 손가락이 손가락이 아니다.
+                    #
+                    # 도구 이름을 자리마다 갈아 끼울 수 있게 해 두었다.
+                    # 목록에 뜨는 이름은 그대로 '손가락' 이고,
+                    # 여기 닿았을 때만 다른 것이 된다.
+                    #
+                    # 말은 문장이 아니라 소리다. 또박또박 말하면 어색해진다.
+                    "pelvis": {
+                        "label": "자지",
+                        "polite": ["흐윽…", "하아…", "으응…", "앗… 그건…",
+                                   "하읏…", "으…", "…읏"],
+                        "casual": ["흐윽…", "하아…", "으응…", "앗… 그건…",
+                                   "하읏…", "으…", "…읏"],
+                    },
+
+                    "mouth": {
+                        "label": "자지",
+                        "polite": ["으읍…", "…읏", "하아…", "으응…", "흐읍…"],
+                        "casual": ["으읍…", "…읏", "하아…", "으응…", "흐읍…"],
                     },
                 },
             ),
@@ -4688,6 +4741,46 @@ DIA = VirtualAvatar(
                     "lines": {
                         "polite": ["얼굴은 안 돼요. 아직 그럴 사이 아니잖아요."],
                         "casual": ["얼굴은 아직 안 돼."],
+                    },
+                },
+            ),
+
+            # 입.
+            #
+            # 얼굴 안에서 다시 갈라낸 자리다. 머리 본 하나가 정수리부터
+            # 턱까지 다 걸치고 있어서 닿은 좌표로 나눈다.
+            TouchZone(
+                key="mouth",
+                label="입",
+                bones=[],            # head_split 이 정한다
+                allow_from=40,
+                tap={
+                    "expression": "surprised",
+                    "expression_warm": ["joy", "fun"],
+                    "motion": "nod",
+                    "affinity": 1,
+                    "lines": {
+                        "polite": ["읏…", "입은… 왜요.", "간지러워요."],
+                        "casual": ["읏…", "입은 왜…", "간지러워."],
+                    },
+                },
+                pet={
+                    "expression": "surprised",
+                    "expression_warm": ["joy", "fun"],
+                    "motion": "shy",
+                    "affinity": 2,
+                    "lines": {
+                        "polite": ["하…", "그렇게 만지시면…", "…계속 하실 거예요?"],
+                        "casual": ["하…", "그렇게 만지면…", "…계속 할 거야?"],
+                    },
+                },
+                deny={
+                    "expression": "surprised",
+                    "motion": "cover",
+                    "affinity": -3,
+                    "lines": {
+                        "polite": ["입은 안 돼요."],
+                        "casual": ["입은 안 돼."],
                     },
                 },
             ),

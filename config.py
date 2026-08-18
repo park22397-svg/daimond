@@ -73,6 +73,12 @@ MAX_HISTORY_MESSAGES = 12
 #               인터넷 없이도 되지만, 윈도우 기본 한국어 목소리라
 #               감정이 실리지 않는다.
 #
+#   "edge"    — 마이크로소프트 Edge 의 읽어주기 목소리. pip install edge-tts.
+#               키도 돈도 필요 없고 브라우저 것보다 훨씬 자연스럽다.
+#               다만 공식 API 는 아니다 — 커뮤니티가 Edge 의 통신을 뜯어
+#               만든 것이라 약관상 회색지대다. 개인 시험용이라는 전제.
+#               한국어 여성은 SunHi 하나뿐이다(InJoon·Hyunsu 는 남성).
+#
 #   "gemini"  — Google Gemini TTS. '아케르나르(Achernar)'가 여기 목소리다.
 #               한국어 억양이 자연스럽고 말투 지시까지 먹는다.
 #               다만 API 키가 있어야 한다.
@@ -86,7 +92,7 @@ MAX_HISTORY_MESSAGES = 12
 
 TTS_ENABLED = True
 
-TTS_PROVIDER = "browser"        # "browser" 또는 "gemini"
+TTS_PROVIDER = "edge"           # "browser" / "edge" / "gemini"
 
 # 아케르나르. gemini 를 쓸 때만 의미가 있다.
 TTS_VOICE = "Achernar"
@@ -95,6 +101,17 @@ TTS_VOICE = "Achernar"
 TTS_API_KEY = ""
 
 TTS_MODEL = "gemini-2.5-flash-preview-tts"
+
+# edge 를 쓸 때의 목소리와 조절값.
+#
+# rate 와 pitch 는 문자열이다. "+10%" "-5%" "+20Hz" 처럼 적는다.
+#
+# rate 는 말이 얼마나 빠른가다. 처음에 -4% 로 두었더니 느렸다.
+# 사람이 편하게 말하는 속도는 기본보다 조금 빠른 쪽이다.
+# 더 빠르게 하려면 +25%, 느리게 하려면 0% 나 -10% 로.
+TTS_EDGE_VOICE = "ko-KR-SunHiNeural"
+TTS_EDGE_RATE = "+15%"
+TTS_EDGE_PITCH = "-2Hz"
 
 # 말투 지시. gemini 는 이 문장대로 읽어 준다.
 TTS_STYLE = "부드럽고 조금 낮은 목소리로, 친한 사람에게 말하듯 자연스럽게"

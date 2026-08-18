@@ -1073,17 +1073,31 @@ def tts_config_api():
         TTS_API_KEY, TTS_RATE, TTS_PITCH,
     )
 
-    # 키가 없으면 gemini 라고 적혀 있어도 브라우저로 내려간다.
-    # 키 없이 부르면 실패만 하고 말이 안 나온다.
+    # 쓸 수 없는 것을 적어 두었으면 브라우저로 내려간다.
+    # 그래야 말은 어쨌든 나온다.
     provider = TTS_PROVIDER
+
     if provider == "gemini" and not TTS_API_KEY:
         provider = "browser"
+
+    if provider == "edge":
+        try:
+            import edge_tts  # noqa: F401
+        except ImportError:
+            print("[목소리] edge-tts 가 없어 브라우저 목소리로 갑니다. "
+                  "pip install edge-tts")
+            provider = "browser"
+
+    voice = TTS_VOICE
+    if provider == "edge":
+        from config import TTS_EDGE_VOICE
+        voice = TTS_EDGE_VOICE
 
     return jsonify(
         {
             "enabled": bool(TTS_ENABLED),
             "provider": provider,
-            "voice": TTS_VOICE,
+            "voice": voice,
             "rate": TTS_RATE,
             "pitch": TTS_PITCH,
             # 브라우저에서 고를 한국어 목소리의 실마리
@@ -1103,6 +1117,63 @@ def tts_api():
     if not TTS_ENABLED:
         return jsonify({"ok": False, "error": "목소리가 꺼져 있습니다."}), 400
 
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text") or "").strip()
+
+    if not text:
+        return jsonify({"ok": False, "error": "읽을 말이 없습니다."}), 400
+
+    # ------------------------------------------------------------
+    # Edge 의 읽어주기 목소리
+    #
+    # 키가 필요 없다. mp3 로 바로 오므로 화면은 그대로 틀면 된다.
+    # ------------------------------------------------------------
+    if TTS_PROVIDER == "edge":
+        try:
+            import asyncio
+            import base64
+
+            import edge_tts
+
+            from config import (
+                TTS_EDGE_VOICE, TTS_EDGE_RATE, TTS_EDGE_PITCH,
+            )
+
+            async def make():
+                c = edge_tts.Communicate(
+                    text,
+                    TTS_EDGE_VOICE,
+                    rate=TTS_EDGE_RATE,
+                    pitch=TTS_EDGE_PITCH,
+                )
+                buf = b""
+                async for chunk in c.stream():
+                    if chunk["type"] == "audio":
+                        buf += chunk["data"]
+                return buf
+
+            audio = asyncio.run(make())
+
+            if not audio:
+                raise RuntimeError("소리가 비었다")
+
+            return jsonify(
+                {
+                    "ok": True,
+                    "provider": "edge",
+                    "voice": TTS_EDGE_VOICE,
+                    "mime": "audio/mpeg",
+                    "audio": base64.b64encode(audio).decode("ascii"),
+                }
+            )
+
+        except Exception as e:
+            print(f"[목소리 오류 - edge]: {e}")
+            return jsonify(
+                {"ok": False, "fallback": "browser",
+                 "error": "목소리를 만들지 못했습니다."}
+            ), 200
+
     if TTS_PROVIDER != "gemini" or not TTS_API_KEY:
         # 화면이 알아서 브라우저 목소리로 읽는다
         return jsonify(
@@ -1112,12 +1183,6 @@ def tts_api():
                 "error": "서버에서 만들 목소리가 없습니다.",
             }
         ), 200
-
-    data = request.get_json(silent=True) or {}
-    text = str(data.get("text") or "").strip()
-
-    if not text:
-        return jsonify({"ok": False, "error": "읽을 말이 없습니다."}), 400
 
     try:
         import base64
