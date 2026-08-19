@@ -443,10 +443,19 @@ def touch_api():
 
         # 옷 판정구는 자기가 어느 자리인지 직접 들고 온다.
         # 다만 잡는 도구가 아니면 무시하고 안쪽 몸으로 넘어간다.
+        #
+        # 벗겨 둔 옷이면 그 자리는 없는 것으로 친다. 없는 옷을
+        # 잡을 수는 없으므로 안쪽 몸으로 넘긴다.
+        _zone_key = data.get("zone")
+
+        _undressed = data.get("undressed")
+        if isinstance(_undressed, list) and _zone_key in _undressed:
+            _zone_key = None
+
         zone = AVATAR.zone_for(
             bone,
             local,
-            zone_key=data.get("zone"),
+            zone_key=_zone_key,
             tool=tool,
         )
 

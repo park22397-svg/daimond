@@ -3552,7 +3552,23 @@
             const hits = raycaster.intersectObjects(hitboxes, false);
             if (!hits.length) return null;
 
-            const hit = hits[0];
+            // 벗긴 옷은 지나친다.
+            //
+            // 판정구는 옷 메시가 아니라 본에 붙어 있어서, 옷을 감춰도
+            // 그 자리는 그대로 남는다. 그래서 옷을 벗기고 잡아도
+            // '옷 잡지 마' 가 나왔다. 없는 옷을 잡을 수는 없다.
+            //
+            // 판정구를 지우지는 않는다 — 다시 입으면 도로 필요하다.
+            // 맞은 것들 중에서 지나쳐 안쪽 몸으로 간다.
+            let hit = null;
+            for (let i = 0; i < hits.length; i++) {
+                const z = hits[i].object.userData.zone;
+                if (z && wearing[z] === false) continue;
+                hit = hits[i];
+                break;
+            }
+
+            if (!hit) return null;
 
             // 손이 닿는 거리 밖이면 못 만진다.
             // 방 건너편에서 쓰다듬을 수는 없다 — 만지려면 다가가야 한다.
