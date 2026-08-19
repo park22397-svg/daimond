@@ -402,6 +402,32 @@ class TouchTool:
     def lines_for(self, zone_key):
         return self.lines.get(zone_key) or self.lines.get("default")
 
+    @staticmethod
+    def with_ro(word):
+        """'로' 인가 '으로' 인가. 받침이 있으면 '으로'.
+
+        '자지로' 를 '자지으로' 라고 적으면 모델이 그 어색함을 따라 쓴다.
+        (ㄹ 받침은 '로' 를 쓴다 — '연필로')
+        """
+        if not word:
+            return ""
+        last = word[-1]
+        if not ("가" <= last <= "힣"):
+            return word + "로"
+        jong = (ord(last) - 0xAC00) % 28
+        return word + ("로" if jong in (0, 8) else "으로")
+
+    @staticmethod
+    def with_eul(word):
+        """'을' 인가 '를' 인가."""
+        if not word:
+            return ""
+        last = word[-1]
+        if not ("가" <= last <= "힣"):
+            return word + "를"
+        jong = (ord(last) - 0xAC00) % 28
+        return word + ("을" if jong else "를")
+
     def label_for(self, zone_key):
         """그 자리에서 이 도구를 뭐라고 부르는가.
 
@@ -4732,9 +4758,34 @@ DIA = VirtualAvatar(
         "head_split": {
             "top_y": 0.13,
             "front_z": -0.02,
-            "mouth_y": -0.005,
+            # 입.
+            #
+            # 이 값은 얼굴 표면이 아니라 **판정구(공) 위** 좌표다.
+            # 판정은 메시가 아니라 본에 붙은 공에서 일어나고,
+            # 공은 얼굴보다 크고 앞으로 나와 있어서 같은 자리를 겨눠도
+            # 공에 맞는 점의 y 가 얼굴 표면보다 위다.
+            #
+            # 예전에는 얼굴 표면을 재서 -0.005 로 두었다. 그래서
+            # **입술은 늘 '얼굴' 이 되고 턱을 눌러야 입이 됐다.**
+            #
+            # 모프가 움직이는 정점으로 부위를 실측하고(Fcl_MTH_*),
+            # 거기를 겨눈 광선이 공 위 어디에 맞는지 계산해서 잡았다.
+            #
+            #   얼굴 표면      공 위 (0.38~0.72m 앞에서 겨눌 때)
+            #   입술 아래  →   y +0.001 ~ +0.016
+            #   입술 위    →   y +0.025 ~ +0.036
+            #   코        →   y +0.036 ~ +0.043
+            #   눈 안쪽    →   y +0.045 ~ +0.050
+            #
+            # 그래서 위 경계는 코 바로 아래인 +0.034.
+            # 아래로는 따로 자르지 않는다 — 턱도 입으로 친다.
+            "mouth_y": 0.034,
             "mouth_z": -0.05,
-            "mouth_x": 0.05,
+
+            # 입술 끝은 공 위에서 |x| 0.013 ~ 0.018 이다.
+            # 눈 아래 볼은 0.025 쯤부터라, 그 사이인 0.022 로 자른다.
+            # 넓게 두면 볼을 눌러도 입이 된다.
+            "mouth_x": 0.022,
         },
 
         # 이만큼 가까워지면 만졌을 때 놀라는 대신 웃는다.

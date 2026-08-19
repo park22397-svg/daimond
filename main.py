@@ -670,8 +670,15 @@ def touch_api():
 
         if remember and result["reply"]:
             try:
-                how = f"{tool.label}으로 " if tool and tool.key != "hand" else ""
-                append_message("user", f"({how}{zone.label}를 만졌다)")
+                # 자리마다 도구 이름이 달라진다.
+                # 손가락은 입과 보지에서 다른 것이 된다 — 기록에도
+                # 그렇게 적어야 한다. 모델이 읽는 것은 기록이라,
+                # 여기에 '손가락' 이라 적으면 나중에 물었을 때
+                # 손가락이었다고 답한다.
+                name = tool.label_for(zone.key) if tool else ""
+                how = f"{tool.with_ro(name)} " if tool and tool.key != "hand" else ""
+                append_message(
+                    "user", f"({how}{tool.with_eul(zone.label)} 만졌다)")
                 append_message("assistant", result["reply"])
             except Exception as e:
                 print(f"[만지기 기록 오류]: {e}")
