@@ -1119,8 +1119,17 @@ class VirtualAvatar:
         """지금 단계를 유지할지 옮길지 정한다.
 
         경계값을 살짝 넘나드는 것만으로 존댓말과 반말이 계속 뒤집히면
-        대화 맥락이 이상해진다. 그래서 단계를 옮기려면 경계에서
-        hysteresis 만큼 더 들어와야 한다.
+        대화 맥락이 이상해진다. 그래서 한 번 들어온 단계는
+        시작선 아래로 hysteresis 만큼 떨어져야 풀린다.
+
+        **들어가는 것은 시작선에서 바로다.** 예전에는 여기에도
+        hysteresis 를 걸었는데, 그러면 표에 적힌 숫자가 거짓말이 된다 —
+        친구 40 이라고 적어 놓고 실제로는 56 이 되어야 친구였고,
+        40~55 사이에서는 숫자로는 친구인데 이름표가 서먹함이었다.
+        모든 단계가 똑같이 16 씩 밀려 있었다.
+
+        나가는 쪽에만 걸어도 뒤집힘은 그대로 막힌다.
+        친구는 40 에서 되고 23 에서 풀리니 그 사이 폭이 완충 구간이다.
         """
         cand = self.stage_for_affinity(affinity)
         cur = self.stage(current_key) if current_key else None
@@ -1131,9 +1140,10 @@ class VirtualAvatar:
         margin = self.relationship.get("hysteresis", 8)
         order = [s.key for s in self.stages()]
 
-        # 위로 올라갈 때: 다음 단계 시작선을 margin 만큼 넘어야 한다
+        # 위로 올라갈 때: 시작선에 닿으면 바로 들어간다.
+        # cand 는 이미 '이 호감이 속한 단계' 라 더 볼 것이 없다.
         if order.index(cand.key) > order.index(cur.key):
-            return cand if affinity >= cand.min_affinity + margin else cur
+            return cand
 
         # 아래로 내려갈 때: 지금 단계 시작선 아래로 margin 만큼 떨어져야 한다
         return cand if affinity < cur.min_affinity - margin else cur
@@ -1204,6 +1214,40 @@ class VirtualAvatar:
 
     def confess_conf(self):
         return self.relationship.get("confess", {})
+
+    def confess_accept_from(self):
+        """이 값 이상이면 고백을 받는다.
+
+        단계 이름(accept_stage)이 적혀 있으면 그 진입선을 쓴다.
+        호감 눈금이 달라져도 '친구부터'라는 뜻이 그대로 남는다.
+        """
+        conf = self.confess_conf()
+        key = conf.get("accept_stage")
+
+        if key:
+            st = next((x for x in self.stages() if x.key == key), None)
+            if st is not None:
+                return st.min_affinity
+
+        return conf.get("accept_from", 40)
+
+    def confess_accepts(self, affinity, stage):
+        """지금 고백을 받아들일 사이인가.
+
+        숫자가 아니라 **지금 어느 사이인가**로 본다.
+        내려오는 길에서 둘이 어긋나기 때문이다 — 이력현상이 있어서
+        호감 30 이어도 친구에서 내려오는 중이면 아직 친구다.
+        숫자로만 재면 그때 고백을 거절하면서 반말로 답하게 된다.
+        말과 사이가 어긋나는 것이다.
+
+        단계를 못 받았을 때만 숫자로 대신 잰다.
+        """
+        want = self.confess_accept_from()
+
+        if stage is None:
+            return affinity >= want
+
+        return stage.min_affinity >= want
 
     def confess_ceiling(self):
         """연인이 되기 전에 호감이 멈추는 값. 없으면 None."""
@@ -1313,7 +1357,7 @@ class VirtualAvatar:
         if lover:
             spec = conf.get("again", {})
             accepted = None
-        elif affinity >= conf.get("accept_from", 160):
+        elif self.confess_accepts(affinity, stage):
             spec = conf.get("accept", {})
             accepted = True
         else:
@@ -3795,15 +3839,32 @@ DIA = VirtualAvatar(
         # 사이가 집착까지 차오르면 거기서 멈추고, 상대가 말을 꺼내
         # 다이아가 받아들여야 그 위로 올라간다.
         #
-        # 받아들이는 조건은 사랑(160) 이다. 그만큼 마음이 있어야
-        # 고백을 받는다. 그 아래에서 꺼내면 거절한다 — 미워서가 아니라
+        # 받아들이는 조건은 친구다. 사귀자는 말은 서로 편해진 뒤에
+        # 나오는 것이지, 이미 사랑에 닿은 다음에 새삼 꺼내는 말이 아니다.
+        # 그래서 길은 이렇게 난다 —
+        #
+        #     친구 -> 고백 -> 연인 -> (한참 올려서) 광기 -> (더 올려서) 얀데레
+        #
+        # 서먹함 이하에서 꺼내면 거절한다. 미워서가 아니라
         # 아직 그 정도가 아니어서다.
         "confess": {
             # 이 사이가 되기 전에는 여기서 호감이 멈춘다
             "ceiling_stage": "frenzy",
 
-            # 이만큼은 되어야 고백을 받는다
-            "accept_from": 160,
+            # 이 단계부터 고백을 받는다.
+            #
+            # 숫자로 적지 않는다. 2026-08-18 에 호감 눈금을 두 배로
+            # 올렸을 때 이런 숫자들이 뜻을 잃었다. 단계 이름으로 적으면
+            # 눈금이 또 달라져도 '친구부터'는 그대로다.
+            #
+            # 재는 것도 숫자가 아니라 지금 어느 사이인가로 한다.
+            # 내려올 때는 이력현상 때문에 둘이 어긋난다 — 호감 30 이어도
+            # 친구에서 내려오는 중이면 아직 친구다. 그때 고백을 받으면서
+            # 존댓말로 답하면 말과 사이가 어긋난다.
+            "accept_stage": "friend",
+
+            # accept_stage 를 못 찾을 때만 쓰는 대비값
+            "accept_from": 40,
 
             # 고백으로 알아듣는 말.
             #

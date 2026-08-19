@@ -36,8 +36,10 @@ for aff in sorted(set(edges)):
 
 print("\n[3] 이력 현상 — 경계에서 말투가 뒤집히지 않는가")
 print(f"  친구 진입선 {LINE} · 이력현상 {HYST}")
-print(f"  친구를 벗어나려면 {LINE - HYST} 아래로, "
-      f"친구가 되려면 {LINE + HYST} 위로 가야 한다")
+print(f"  친구가 되는 것은 {LINE} 에서 바로,")
+print(f"  친구가 풀리는 것은 {LINE - HYST} 아래로 떨어져야 한다")
+print(f"  (이력현상은 나가는 쪽에만 건다. 들어가는 쪽에도 걸면"
+      f" 표의 {LINE} 이 거짓말이 된다)")
 
 print("\n  친구 상태에서 친밀도가 내려갈 때:")
 for aff in [LINE, LINE - 1, LINE - HYST + 1, LINE - HYST, LINE - HYST - 1]:
@@ -46,7 +48,7 @@ for aff in [LINE, LINE - 1, LINE - HYST + 1, LINE - HYST, LINE - HYST - 1]:
     print(f"    {aff:>4} : {st.label:<8} {note}")
 
 print("\n  서먹함 상태에서 친밀도가 올라갈 때:")
-for aff in [LINE - 1, LINE, LINE + 1, LINE + HYST - 1, LINE + HYST]:
+for aff in [LINE - HYST, LINE - 1, LINE, LINE + 1, LINE + HYST]:
     st = A.next_stage(aff, "distant")
     note = "유지" if st.key == "distant" else "→ " + st.label
     print(f"    {aff:>4} : {st.label:<8} {note}")
@@ -56,16 +58,19 @@ for aff in [LINE - 1, LINE, LINE + 1, LINE + HYST - 1, LINE + HYST]:
 # 다만 ±1 만 보면 '아예 안 바뀌는' 버그를 못 잡는다.
 # 그래서 이력현상이 정확히 그 폭만큼인지도 같이 본다.
 checks = [
+    # 들어가는 쪽 — 시작선에서 바로, 그 한 칸 아래에서는 아직
+    (LINE, "distant", "friend",
+     f"{LINE}에 닿았는데 친구가 안 됐다 — 표의 숫자가 거짓말이 된다"),
+    (LINE - 1, "distant", "distant",
+     f"{LINE - 1}에서 벌써 친구가 됐다 — 시작선보다 이르다"),
+
+    # 나가는 쪽 — 이력현상만큼 떨어져야 풀린다
     (LINE - 1, "friend", "friend",
      f"{LINE - 1}에서 친구가 바로 풀렸다"),
-    (LINE + 1, "distant", "distant",
-     f"{LINE + 1}에서 서먹함이 바로 친구가 됐다"),
     (LINE - HYST, "friend", "friend",
      f"{LINE - HYST}에서 친구가 풀렸다 — 이력현상이 {HYST}보다 좁다"),
     (LINE - HYST - 1, "friend", "distant",
      f"{LINE - HYST - 1}까지 내려가도 친구다 — 이력현상이 {HYST}보다 넓다"),
-    (LINE + HYST, "distant", "friend",
-     f"{LINE + HYST}에서도 친구가 안 됐다 — 이력현상이 {HYST}보다 넓다"),
 ]
 
 bad = 0
@@ -78,8 +83,8 @@ for aff, came_from, want, msg in checks:
 fails += bad
 
 if not bad:
-    print(f"\n  PASS  경계 ±1 에서 흔들리지 않고, "
-          f"이력현상이 정확히 {HYST} 만큼이다")
+    print(f"\n  PASS  {LINE} 에서 바로 친구가 되고, "
+          f"{LINE - HYST} 아래로 떨어져야 풀린다")
 
 print("\n[4] 말 한마디의 점수")
 cases = [

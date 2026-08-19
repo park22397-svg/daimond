@@ -1025,6 +1025,79 @@ def first_talk_api():
 # ============================================================
 
 @app.route(
+    "/api/child",
+    methods=["GET", "POST"]
+)
+def child_api():
+    """아이에 관한 값을 보고, 맞춘다. 시험용이다.
+
+    절정 다섯 번을 손으로 채우지 않고도 배가 부른 모습을 봐야
+    배 모양(pregnancy.spine_scale)을 눈으로 맞출 수 있다.
+
+    POST 로 보낼 수 있는 것 (안 적은 것은 그대로 둔다):
+      wants_child : 아이를 갖겠다고 말했는가
+      climax      : 절정을 몇 번 겪었는가
+      strokes     : 절정까지 얼마나 왔는가
+      pregnant    : 아이가 섰는가
+      devotion    : 순종 (0~50). raw 로 바꿔서 넣는다
+    """
+
+    try:
+        from memory_manager import load_relationship, save_relationship
+
+        saved = load_relationship() or {}
+
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+
+            def pick(key, cast):
+                v = data.get(key)
+                return None if v is None else cast(v)
+
+            devotion = data.get("devotion")
+            devotion_raw = None
+            if devotion is not None:
+                per = AVATAR.devotion_conf().get("per_point", 100)
+                devotion_raw = int(devotion) * per
+
+            save_relationship(
+                saved.get("affinity", 0),
+                saved.get("stage", "distant"),
+                devotion_raw=devotion_raw,
+                lover=None,
+                wants_child=pick("wants_child", bool),
+                strokes=pick("strokes", int),
+                climax=pick("climax", int),
+                pregnant=pick("pregnant", bool),
+            )
+            saved = load_relationship() or {}
+
+        sx = AVATAR.sex_conf()
+        raw = saved.get("devotion_raw", 0)
+
+        return jsonify({
+            "ok": True,
+            "wants_child": bool(saved.get("wants_child", False)),
+            "strokes": int(saved.get("strokes", 0)),
+            "climax": int(saved.get("climax", 0)),
+            "pregnant": bool(saved.get("pregnant", False)),
+            "devotion": AVATAR.devotion_level(raw),
+            "devotion_raw": raw,
+
+            # 무엇이 얼마나 남았는지 화면이 적어 줄 수 있게
+            "need_strokes": int(sx.get("climax_strokes", 8)),
+            "need_climax": int(sx.get("to_pregnant", 5)),
+            "need_devotion": AVATAR.child_conf().get("devotion", 50),
+            "need_stage": AVATAR.child_conf().get("stage", "yandere"),
+            "stage": saved.get("stage"),
+        })
+
+    except Exception as e:
+        print(f"[아이 창구 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route(
     "/api/relationship/reset",
     methods=["POST"]
 )

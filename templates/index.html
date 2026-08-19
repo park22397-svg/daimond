@@ -1159,6 +1159,7 @@
         let pregnant = false;        // 아이가 섰는가
         let bellyNow = 0;            // 지금 부른 정도 0~1
         let bellyWant = 0;           // 가려는 곳
+        let bellyOverride = null;    // 시험 창이 밀고 있는 값
 
         function pregCfg() {
             return (ENTITY && ENTITY.pregnancy) || null;
@@ -1183,8 +1184,12 @@
             } catch (e) {}
             if (!spine) return;
 
+            // 시험 창에서 밀고 있으면 그 값이 먼저다.
+            // 개체가 가진 값은 그대로 두고 화면에서만 바꿔 본다 —
+            // 눈으로 맞춘 뒤에 avatar.py 로 옮겨 적는다.
             const p = pregCfg();
-            const to = (p && p.spine_scale) || [1.30, 1.02, 1.55];
+            const to = bellyOverride || (p && p.spine_scale)
+                || [1.30, 1.02, 1.55];
 
             const sx = 1 + (to[0] - 1) * k;
             const sy = 1 + (to[1] - 1) * k;
@@ -1198,7 +1203,9 @@
         }
 
         function updateBelly(dt) {
-            if (bellyNow === bellyWant && bellyNow === 0) return;
+            // 시험 창이 열려 있으면 값이 매 프레임 달라질 수 있으므로
+            // 배가 0 이어도 계속 다시 그린다.
+            if (!bellyOverride && bellyNow === bellyWant && bellyNow === 0) return;
 
             if (bellyNow !== bellyWant) {
                 const p = pregCfg();
@@ -5632,6 +5639,205 @@
         }
 
 
+        // ------------------------------------------------------------
+        // 아이 — 시험용 명령어
+        //
+        // 절정 다섯 번을 손으로 채우지 않고도 배가 부른 모습을 봐야
+        // 배 모양을 눈으로 맞출 수 있다.
+        // ------------------------------------------------------------
+
+        function handleChildCommand(text) {
+            const t = text.replace(/\s+/g, '');
+
+            if (t === '/아이' || t === '/임신상태') {
+                appendMessage('user', text);
+                childState(null);
+                return true;
+            }
+
+            if (t === '/임신') {
+                appendMessage('user', text);
+                childState({ wants_child: true, pregnant: true, strokes: 0 },
+                            '아이가 섰습니다.');
+                return true;
+            }
+
+            if (t === '/임신취소' || t === '/임신해제') {
+                appendMessage('user', text);
+                childState({ pregnant: false, climax: 0, strokes: 0 },
+                            '되돌렸습니다.');
+                return true;
+            }
+
+            if (t === '/약속') {
+                appendMessage('user', text);
+                childState({ wants_child: true }, '아이를 갖기로 한 것으로 둡니다.');
+                return true;
+            }
+
+            let m = t.match(/^\/절정(-?\d+)$/);
+            if (m) {
+                appendMessage('user', text);
+                childState({ climax: parseInt(m[1], 10), strokes: 0 });
+                return true;
+            }
+
+            m = t.match(/^\/순종(-?\d+)$/);
+            if (m) {
+                appendMessage('user', text);
+                childState({ devotion: parseInt(m[1], 10) });
+                return true;
+            }
+
+            if (t === '/배') {
+                appendMessage('user', text);
+                toggleBellyPanel();
+                return true;
+            }
+
+            return false;
+        }
+
+
+        async function childState(patch, note) {
+            try {
+                const res = await fetch('/api/child', {
+                    method: patch ? 'POST' : 'GET',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: patch ? JSON.stringify(patch) : undefined,
+                });
+                const d = await res.json();
+
+                if (!d.ok) {
+                    appendMessage('ai', d.error || '맞추지 못했습니다.');
+                    return;
+                }
+
+                setPregnant(d.pregnant, false);
+
+                myDevotion.level = d.devotion;
+                myDevotion.raw = d.devotion_raw;
+
+                appendMessage('ai',
+                    (note ? note + '\n\n' : '')
+                    + '단계     ' + (d.stage || '?')
+                    + '  (아이 이야기는 ' + d.need_stage + ' 부터)\n'
+                    + '순종     ' + d.devotion + ' / ' + d.need_devotion + '\n'
+                    + '약속     ' + (d.wants_child ? '했다' : '아직')  + '\n'
+                    + '절정     ' + d.climax + ' / ' + d.need_climax + '\n'
+                    + '쌓인 것  ' + d.strokes + ' / ' + d.need_strokes + '\n'
+                    + '배       ' + (d.pregnant ? '불렀다' : '아직'));
+
+            } catch (e) {
+                console.warn('[diamondAI] 아이 상태 실패:', e);
+                appendMessage('ai', '맞추지 못했습니다.');
+            }
+        }
+
+
+        // ------------------------------------------------------------
+        // 배 시험 창
+        //
+        // 뼈 배율은 화면을 보며 미는 값이라 파일을 고치고 새로 고치는
+        // 방식으로는 못 맞춘다. /rig 와 같은 방식으로 슬라이더를 두고,
+        // 맞춘 값을 avatar.py 에 적을 꼴로 뽑아 준다.
+        // ------------------------------------------------------------
+
+        let bellyPanel = null;
+
+        function toggleBellyPanel() {
+            if (bellyPanel) {
+                bellyPanel.remove();
+                bellyPanel = null;
+                bellyOverride = null;
+                appendMessage('ai', '배 시험 창을 닫았습니다.');
+                return;
+            }
+
+            const p = pregCfg() || {};
+            const cur = (p.spine_scale || [1.30, 1.02, 1.55]).slice();
+
+            bellyPanel = document.createElement('div');
+            bellyPanel.style.cssText =
+                'position:fixed;right:14px;bottom:14px;z-index:40;width:250px;' +
+                'background:rgba(20,22,42,0.94);border:1px solid #3a3f68;' +
+                'border-radius:12px;padding:12px 13px;color:#dfe1f0;' +
+                'font-size:0.8rem;font-family:inherit;user-select:none';
+
+            const axes = [
+                ['가로', 0, 1.0, 2.2],
+                ['위아래', 1, 0.8, 1.4],
+                ['앞뒤', 2, 1.0, 2.4],
+            ];
+
+            let html = '<b>배 — spine 배율</b>'
+                + '<div style="opacity:.6;margin:3px 0 9px">'
+                + 'chest 는 역수로 되돌려 위쪽 몸은 그대로 둔다</div>';
+
+            axes.forEach(([label, i, lo, hi]) => {
+                html += '<div style="margin:7px 0 2px">' + label
+                    + ' <span id="bv' + i + '">' + cur[i].toFixed(2)
+                    + '</span></div>'
+                    + '<input type="range" id="bs' + i + '" style="width:100%"'
+                    + ' min="' + lo + '" max="' + hi + '" step="0.01"'
+                    + ' value="' + cur[i] + '">';
+            });
+
+            html += '<div style="margin:9px 0 2px">부른 정도'
+                + ' <span id="bvk">1.00</span></div>'
+                + '<input type="range" id="bsk" style="width:100%"'
+                + ' min="0" max="1" step="0.02" value="1">'
+                + '<button id="bcopy" style="width:100%;margin-top:10px;'
+                + 'padding:6px;border-radius:8px;background:#4a3f77;'
+                + 'border:1px solid #7a68b0;color:#dfe1f0;cursor:pointer;'
+                + 'font-family:inherit">avatar.py 에 적을 꼴로 복사</button>'
+                + '<div style="opacity:.6;margin-top:7px">/배 로 닫는다</div>';
+
+            bellyPanel.innerHTML = html;
+            document.body.appendChild(bellyPanel);
+
+            bellyOverride = cur;
+            bellyNow = 1;
+            bellyWant = 1;
+
+            const push = () => {
+                axes.forEach(([, i]) => {
+                    const v = parseFloat(
+                        document.getElementById('bs' + i).value);
+                    cur[i] = v;
+                    document.getElementById('bv' + i).textContent = v.toFixed(2);
+                });
+                bellyOverride = cur.slice();
+            };
+
+            axes.forEach(([, i]) => {
+                document.getElementById('bs' + i)
+                    .addEventListener('input', push);
+            });
+
+            document.getElementById('bsk').addEventListener('input', (e) => {
+                const k = parseFloat(e.target.value);
+                document.getElementById('bvk').textContent = k.toFixed(2);
+                bellyNow = k;
+                bellyWant = k;
+            });
+
+            document.getElementById('bcopy').addEventListener('click', () => {
+                const txt = 'pregnancy={\n'
+                    + '    "spine_scale": [' + cur.map(v => v.toFixed(2)).join(', ') + '],\n'
+                    + '    "grow_ms": ' + (p.grow_ms || 2600) + ',\n'
+                    + '},';
+                navigator.clipboard.writeText(txt).catch(() => {});
+                appendMessage('ai', txt);
+            });
+
+            appendMessage('ai',
+                '배 시험 창을 열었습니다. 슬라이더로 맞춘 뒤 복사해서 '
+                + 'avatar.py 의 pregnancy 에 적으세요.\n'
+                + '창을 닫으면 개체가 가진 값으로 돌아갑니다.');
+        }
+
+
         // 목소리를 켜고 끈다.
         function handleVoiceCommand(text) {
 
@@ -5686,6 +5892,15 @@
 
 /호감 초기화   사이를 처음으로 (기억은 그대로 둔다)
 /호감 <숫자>   그 값으로 맞추기 (예: /호감 300)
+
+[아이 — 시험용]
+/아이          지금 어디까지 왔는지 보기
+/순종 <숫자>   순종 맞추기 (아이 이야기는 50 부터)
+/약속          아이를 갖기로 한 것으로 두기
+/절정 <숫자>   절정 횟수 맞추기 (5 면 다음 절정에 아이가 선다)
+/임신          바로 아이가 서게
+/임신 취소     되돌리기
+/배            배 모양 슬라이더 창
 
 /기억삭제  (되돌릴 수 없음)
 
@@ -5846,6 +6061,15 @@
 
             if (
                 handleVoiceCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            // 아이 — 시험용
+            if (
+                handleChildCommand(text)
             ) {
 
                 return;
