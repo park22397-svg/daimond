@@ -348,7 +348,15 @@ def _fallback(stage, polite_text, casual_text):
 # 핵심 대화 처리 프로세스
 # ============================================================
 
-def process_chat(user_text):
+def process_chat(user_text, seeing=None, cut_off=False):
+    """상대의 말에 답한다.
+
+    seeing 은 지금 눈에 보이는 것이다(카메라나 사진).
+    그림을 보는 모델이 적어 준 글이고, 그것을 읽고 무슨 말을 할지는
+    여기서 다이아가 정한다. 눈이 대신 말하게 두지 않는다.
+
+    cut_off 는 방금 말하던 것을 상대가 끊고 들어왔는가다.
+    """
 
     if not user_text:
         return {
@@ -671,6 +679,55 @@ def process_chat(user_text):
                 f"상대가 방금 너의 {touch['label']}을(를) 만졌다. "
                 f"그 행동에 반응해서 답하라. "
                 f"괄호 안의 말을 따라 적지는 마라."
+            ),
+        })
+
+    # 말하던 것을 끊고 들어왔다.
+    #
+    # 아무 일도 없었던 것처럼 이어 말하면 끊긴 티가 안 난다.
+    # 무슨 말을 하라고는 적지 않는다 — 사이가 정할 일이다.
+    # 친구라면 웃으며 넘어가고, 집착이라면 말을 자른 것을 짚는다.
+    if cut_off:
+        messages.append({
+            "role": "system",
+            "content": (
+                "[방금 네가 말하던 중에 상대가 끼어들어 말을 끊었다] "
+                "하던 말을 처음부터 다시 하지 마라. "
+                "끊긴 것을 알고 있는 사람으로서 답하라."
+            ),
+        })
+
+    # 지금이 언제인가.
+    #
+    # 기분과 같은 자리에 같은 방식으로 넣는다. 무슨 말을 하라고는
+    # 적지 않는다 — 새벽이라는 것만 알면 사이에 맞는 말이 알아서 나온다.
+    try:
+        from memory_manager import touch_session
+        _before = touch_session()
+        _when = AVATAR.time_note(last_talk=_before)
+    except Exception as e:
+        print(f"[시간 읽기 오류]: {e}")
+        _when = None
+
+    if _when:
+        messages.append({
+            "role": "system",
+            "content": f"[지금] {_when}",
+        })
+
+    # 지금 눈에 보이는 것.
+    #
+    # 이 글은 그림을 보는 모델이 적은 것이지 다이아가 적은 것이 아니다.
+    # 그래서 '설명을 따라 적지 마라' 를 같이 준다 — 안 그러면
+    # "파란 배경에 노란 사각형이 보이네" 같은 남의 말투가 그대로 나온다.
+    if seeing:
+        messages.append({
+            "role": "system",
+            "content": (
+                f"[지금 네 눈에 보이는 것] {seeing}\n"
+                f"이건 네가 본 것이다. 설명문을 따라 적지 말고 "
+                f"본 사람으로서 네 말로 반응하라. "
+                f"보이는 것을 다 짚지 말고 눈에 걸리는 것 하나만 말해도 된다."
             ),
         })
 

@@ -79,8 +79,12 @@ def chat_api():
                 }
             ), 400
 
+        # 카메라가 켜져 있으면 화면이 '지금 보이는 것' 을 같이 보낸다.
+        # 그러면 말을 걸 때마다 다이아가 상대를 보면서 답한다.
         result = process_chat(
-            user_text
+            user_text,
+            seeing=(data.get("seeing") or None),
+            cut_off=bool(data.get("cut_off")),
         )
 
         return jsonify(
@@ -1023,6 +1027,107 @@ def first_talk_api():
 # 사이만 처음으로 돌리고 싶을 때가 있어서 따로 뒀다.
 # ('/새 기억'은 기억까지 통째로 치운다. 이건 사이만 건드린다.)
 # ============================================================
+
+# ==================================================================
+# 눈
+#
+# 카메라나 사진을 그림 보는 모델에게 보내 '무엇이 보이는지' 를 받고,
+# 그것을 읽고 무슨 말을 할지는 다이아가 정한다.
+#
+# 둘을 나눈 이유: 그림 보는 모델은 다이아가 아니다. 그 모델이 직접
+# 답하면 말투도, 사이도, 기억도 모르는 다른 사람이 답하게 된다.
+# ==================================================================
+
+def _describe(image_b64):
+    """그림에 무엇이 보이는지 한 줄로 받아 온다. 못 보면 None."""
+
+    import requests
+    from config import OLLAMA_URL, VISION_ENABLED, VISION_MODEL
+
+    if not VISION_ENABLED:
+        return None
+
+    conf = AVATAR.vision or {}
+    if not conf.get("enabled", True):
+        return None
+
+    prompt = conf.get("look_prompt") or "이 사진에 무엇이 보이는지 한국어로 적어라."
+
+    r = requests.post(OLLAMA_URL, json={
+        "model": VISION_MODEL,
+        "messages": [{
+            "role": "user",
+            "content": prompt,
+            "images": [image_b64],
+        }],
+        "stream": False,
+        # 눈은 생각하지 않는다. 보이는 것만 적으면 된다.
+        "think": False,
+    }, timeout=180)
+
+    if r.status_code != 200:
+        print(f"[눈]: HTTP {r.status_code}")
+        return None
+
+    seen = ((r.json().get("message") or {}).get("content") or "").strip()
+    return seen or None
+
+
+@app.route(
+    "/api/see",
+    methods=["POST"]
+)
+def see_api():
+    """사진 한 장을 보여 준다.
+
+    받는 값:
+      image   : base64 (앞의 data:...;base64, 는 떼고 보낸다)
+      message : 같이 적어 보낸 말. 없으면 그냥 보여 준 것이다
+      speak   : 말을 시킬 것인가. 카메라가 혼자 볼 때는 False 로 보낸다
+
+    speak 가 False 면 본 것만 돌려주고 모델을 부르지 않는다.
+    20초마다 한 번씩 말을 걸면 혼자 떠드는 사람이 된다.
+    """
+
+    try:
+        from ai_brain import process_chat
+
+        data = request.get_json(silent=True) or {}
+        image = data.get("image")
+
+        if not image or not isinstance(image, str):
+            return jsonify({"ok": False, "error": "그림이 없습니다"}), 400
+
+        # 앞머리가 붙어 와도 받아 준다
+        if "," in image[:64] and image[:5] == "data:":
+            image = image.split(",", 1)[1]
+
+        seen = _describe(image)
+
+        if not seen:
+            return jsonify({"ok": False, "error": "보지 못했습니다"}), 502
+
+        print(f"[눈]: {seen}")
+
+        if not data.get("speak", True):
+            # 보기만 한다. 무슨 말을 할지는 다음에 말을 걸 때 정한다.
+            return jsonify({"ok": True, "seen": seen, "spoke": False})
+
+        said = (data.get("message") or "").strip()
+        if not said:
+            # 말 없이 보여 주기만 했다. 그것도 하나의 말이다.
+            said = "(사진을 보여 준다)"
+
+        out = process_chat(said, seeing=seen)
+        out["ok"] = True
+        out["seen"] = seen
+        out["spoke"] = True
+        return jsonify(out)
+
+    except Exception as e:
+        print(f"[눈 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 @app.route(
     "/api/child",

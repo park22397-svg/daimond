@@ -445,6 +445,8 @@ class VirtualAvatar:
         motions=None,
         locomotion=None,
         pregnancy=None,
+        vision=None,
+        time_sense=None,
         relationship=None,
         touch=None,
         game=None,
@@ -467,6 +469,10 @@ class VirtualAvatar:
         self.locomotion = locomotion or {}
         # 아이가 선 뒤 배가 불러 오는 정도. 화면이 뼈를 부풀리는 데 쓴다.
         self.pregnancy = pregnancy or {}
+        # 눈. 카메라가 켜져 있으면 그것이 다이아의 눈이다.
+        self.vision = vision or {}
+        # 시간. 몇 시인지, 며칠 만인지.
+        self.time_sense = time_sense or {}
         self.touch = touch or {}
 
     def motion(self, key):
@@ -1271,6 +1277,54 @@ class VirtualAvatar:
     # 그 전에는 물어도 말을 돌린다.
     # --------------------------------------------------------
 
+    # --------------------------------------------------------
+    # 시간
+    # --------------------------------------------------------
+
+    def time_note(self, now=None, last_talk=None):
+        """지금이 언제이고 얼마 만인지를 한 줄로. 적을 것이 없으면 None.
+
+        무슨 말을 하라고는 적지 않는다. 상황만 준다 —
+        사이에 맞는 말은 단계가 이미 정하고 있다.
+        """
+        import datetime
+
+        conf = self.time_sense
+        if not conf.get("enabled", True):
+            return None
+
+        now = datetime.datetime.now() if now is None else now
+
+        # 몇 시인가
+        name = ""
+        for start, label in conf.get("hours", []):
+            if now.hour >= start:
+                name = label
+
+        days = "월화수목금토일"
+        day = days[now.weekday()] if now.weekday() < 7 else ""
+
+        bits = [f"{day}요일 {name} {now.hour}시"]
+
+        # 자고 있어야 할 때인가
+        lo = conf.get("late_from")
+        hi = conf.get("late_to")
+        if lo is not None and hi is not None and lo <= now.hour < hi:
+            bits.append("보통은 자고 있을 시각이다")
+
+        # 얼마 만인가
+        if last_talk:
+            import time as _t
+            gap = _t.time() - float(last_talk)
+
+            if gap >= conf.get("gap_floor", 3600):
+                for need, label in conf.get("gaps", []):
+                    if gap >= need:
+                        bits.append(f"마지막으로 이야기한 지 {label}")
+                        break
+
+        return " · ".join(bits)
+
     def child_conf(self):
         return self.relationship.get("child", {})
 
@@ -1855,6 +1909,8 @@ class VirtualAvatar:
             "motions": [m.to_dict() for m in self.motions],
             "locomotion": self.locomotion,
             "pregnancy": self.pregnancy,
+            "vision": self.vision,
+            "time_sense": self.time_sense,
             "game": {
                 "rps": {
                     "hands": self.rps_hands(),
@@ -4354,6 +4410,98 @@ DIA = VirtualAvatar(
             "등 돌리기": "turn_back",
             "등돌리기": "turn_back",
         },
+    },
+
+    # 아이가 선 뒤 배가 불러 오는 정도.
+    #
+    # 몸에 그런 모프가 없어서 뼈로 만든다. spine 을 가로·앞뒤로 부풀리고
+    # 그 자식인 chest 를 같은 만큼 되돌린다 — 안 되돌리면 가슴과 어깨까지
+    # 같이 불어난다. 사이에 낀 배만 남는다.
+    # ----------------------------------------------------------
+    # 시간
+    #
+    # 지금 몇 시인지, 며칠 만에 왔는지를 모르면 사람이 아니다.
+    # 새벽 세 시에 말을 걸어도 "안 자?" 가 안 나오고,
+    # 사흘 만에 와도 "왜 안 왔어" 가 안 나온다.
+    #
+    # 기분([지금 기분])과 같은 방식으로 프롬프트에 한 줄 넣는다.
+    # 무슨 말을 할지는 적지 않는다 — 상황만 알려주면 사이에 맞는 말이
+    # 알아서 나온다. 문장을 정해 주면 늘 같은 말을 하게 된다.
+    # ----------------------------------------------------------
+    time_sense={
+        "enabled": True,
+
+        # 시각을 부르는 이름. (시작 시각, 이름)
+        "hours": [
+            (0, "한밤중"),
+            (3, "새벽"),
+            (6, "이른 아침"),
+            (9, "오전"),
+            (12, "한낮"),
+            (14, "오후"),
+            (18, "저녁"),
+            (21, "밤"),
+            (23, "한밤중"),
+        ],
+
+        # 이 시각 사이는 '자고 있어야 할 때' 로 본다
+        "late_from": 1,
+        "late_to": 6,
+
+        # 얼마 만에 왔는가. (이 시간 이상이면, 뭐라고 부를지) 초 단위.
+        # 위에서부터 보다가 처음 걸리는 것을 쓴다.
+        "gaps": [
+            (2592000, "한 달이 넘었다"),
+            (604800, "일주일이 넘었다"),
+            (259200, "사흘이 넘었다"),
+            (86400, "하루가 넘었다"),
+            (21600, "반나절쯤 지났다"),
+            (3600, "몇 시간 지났다"),
+        ],
+
+        # 이보다 짧으면 아예 적지 않는다. 방금 하던 이야기다.
+        "gap_floor": 3600,
+    },
+
+    # ----------------------------------------------------------
+    # 눈
+    #
+    # 카메라가 켜져 있으면 그것이 다이아의 눈이다.
+    #
+    # 보는 것과 말하는 것을 나눈 이유: 그림을 보는 모델은 다이아가
+    # 아니다. 그 모델이 직접 답하면 말투도 사이도 기억도 모르는
+    # 다른 사람이 답하게 된다. 그래서 보는 모델은 '무엇이 보이는지'
+    # 만 적고, 그걸 읽고 무슨 말을 할지는 다이아가 정한다.
+    # ----------------------------------------------------------
+    vision={
+        "enabled": True,
+
+        # 보는 모델에게 시키는 말. 성격을 주지 않는다 —
+        # 이 모델은 눈이지 사람이 아니다.
+        "look_prompt": (
+            "이 사진에 무엇이 보이는지 한국어로 두 문장 안에 적어라. "
+            "사람이 있으면 표정과 무엇을 하고 있는지를 먼저 적어라. "
+            "감상이나 인사말은 쓰지 말고 보이는 것만 적어라."
+        ),
+
+        # 카메라를 켜 두었을 때 이만큼마다 한 번 본다.
+        # 너무 자주 보면 서버가 쉬지 못하고, 너무 뜸하면 눈이 아니다.
+        "look_every_ms": 20000,
+
+        # 보고 나서 말을 거는 것은 이만큼마다 한 번만.
+        # 볼 때마다 말하면 혼자 떠드는 사람이 된다.
+        "comment_every_ms": 150000,
+
+        # 보이는 것이 이만큼 달라졌을 때만 말을 건다(글자 겹침 비율).
+        # 같은 자리에 같은 자세로 있으면 새삼 말할 것이 없다.
+        "comment_change": 0.45,
+
+        # 사진을 받았을 때는 늘 말한다. 보여 준 것이니까.
+        "photo_always_speaks": True,
+
+        # 화면에서 보내기 전에 이 크기로 줄인다(긴 변, px).
+        # 원본을 그대로 보내면 base64 가 몇 MB 가 된다.
+        "send_size": 768,
     },
 
     # 아이가 선 뒤 배가 불러 오는 정도.

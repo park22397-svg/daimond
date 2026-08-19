@@ -159,6 +159,18 @@ def load_memory_data():
     if not isinstance(mood, dict):
         mood = {}
 
+    # 언제 마지막으로 이야기했는가.
+    #
+    # 대화 기록에는 시각이 없다. 그래서 며칠 못 봤는지 알 수가 없었다.
+    # 기록마다 시각을 붙이면 파일이 커지고 옛 기록과도 안 맞으므로,
+    # '마지막 한 번' 만 따로 적어 둔다.
+    #
+    # 여기 안 적어 두면 저장할 때마다 사라진다(기분과 같은 함정).
+    session = data.get("session", {})
+
+    if not isinstance(session, dict):
+        session = {}
+
     if not isinstance(conversation, list):
         conversation = []
 
@@ -176,8 +188,33 @@ def load_memory_data():
         "long_term": long_term,
         "relationship": relationship,
         "user": user,
-        "mood": mood
+        "mood": mood,
+        "session": session
     }
+
+
+def load_session():
+    """마지막으로 이야기한 시각 등. 없으면 빈 dict."""
+    return load_memory_data().get("session", {})
+
+
+def touch_session(now=None):
+    """지금 이야기했다고 적는다. 직전 값을 돌려준다.
+
+    돌려주는 것이 '직전' 인 이유: 지금 시각을 적고 나면
+    얼마 만에 온 것인지 알 수가 없기 때문이다.
+    """
+    import time
+
+    now = time.time() if now is None else float(now)
+
+    data = load_memory_data()
+    before = data.get("session", {}).get("last_talk")
+
+    data["session"] = dict(data.get("session", {}), last_talk=now)
+    save_memory_data(data)
+
+    return before
 
 
 # ============================================================

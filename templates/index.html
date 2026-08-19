@@ -75,6 +75,72 @@
             font-family: inherit;
         }
 
+        /* 눈 — 사진과 카메라 */
+        #eye-bar {
+            position: absolute;
+            left: 14px;
+            top: 96px;
+            z-index: 12;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            align-items: flex-start;
+            user-select: none;
+        }
+
+        #eye-bar button {
+            width: 38px;
+            height: 32px;
+            background: rgba(20, 22, 42, 0.72);
+            border: 1px solid #3a3f68;
+            color: #dfe1f0;
+            border-radius: 999px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        #eye-bar button:hover { background: rgba(42, 47, 82, 0.9); }
+        #eye-bar button.on { background: #4a3f77; border-color: #7a68b0; }
+
+        /* 듣고 있는 동안 숨쉬듯 밝아진다. 켜졌는지 눈으로 알아야 한다. */
+        #eye-mic.on { animation: miclive 1.4s ease-in-out infinite; }
+
+        @keyframes miclive {
+            0%, 100% { background: #4a3f77; }
+            50%      { background: #6b58a8; }
+        }
+
+        /* 알아듣고 있는 말. 확정 전이라 흐리게 둔다. */
+        #mic-draft {
+            position: fixed;
+            left: 50%;
+            bottom: 150px;
+            transform: translateX(-50%);
+            max-width: 60%;
+            padding: 6px 13px;
+            border-radius: 14px;
+            background: rgba(74, 63, 119, 0.8);
+            color: #e6e3f5;
+            font-size: 0.85rem;
+            z-index: 41;
+            pointer-events: none;
+            display: none;
+        }
+
+        /* 카메라가 켜졌을 때만 보이는 작은 미리보기.
+           내가 무엇을 보여 주고 있는지 알아야 한다. */
+        #eye-video {
+            display: none;
+            width: 132px;
+            border: 1px solid #3a3f68;
+            border-radius: 8px;
+            /* 거울처럼 뒤집는다 — 안 뒤집으면 손을 드는 방향이 반대다 */
+            transform: scaleX(-1);
+        }
+
+        #eye-video.on { display: block; }
+
         /* ----------------------------------------------------------
            조이스틱 — 마우스로 걷기
 
@@ -581,6 +647,15 @@
             <button id="rps-open">✌ 가위바위보</button>
             <div id="rps-hands"></div>
         </div>
+
+        <!-- 눈 — 사진 보내기와 카메라 -->
+        <div id="eye-bar">
+            <button id="eye-photo" title="사진 보여주기">🖼</button>
+            <button id="eye-cam" title="카메라를 다이아 눈으로">📷</button>
+            <button id="eye-mic" title="말로 걸기">🎤</button>
+            <video id="eye-video" autoplay playsinline muted></video>
+        </div>
+        <input type="file" id="eye-file" accept="image/*" style="display:none">
 
         <!-- 마우스로 걷기 -->
         <div id="stick-pad"><div id="stick-knob"></div></div>
@@ -4935,6 +5010,8 @@
             updateUser(deltaTime);
             updateNotice();
             updateKissWait();
+            findFace();
+            updateGaze(deltaTime);
 
 
             if (currentVRM) {
@@ -5036,7 +5113,13 @@
                                     clock.getElapsedTime() *
                                     2.0
                                 ) *
-                                0.02;
+                                0.02
+                                // 카메라에 보이는 얼굴 쪽으로 고개를 든다
+                                + gaze.pitch;
+
+                            // 좌우는 여기서만 건드린다.
+                            // 몸이 도는 것(roam.yaw)과 별개로 고개만 돌린다.
+                            head.rotation.y = gaze.yaw;
                         }
 
                     } catch (e) {}
@@ -5838,6 +5921,490 @@
         }
 
 
+        // ============================================================
+        // 눈
+        //
+        // 카메라가 켜져 있으면 그것이 다이아의 눈이다.
+        //
+        // 보는 것과 말하는 것을 나눴다. 20초마다 한 번씩 보되(speak=false)
+        // 볼 때마다 말하지는 않는다 — 그러면 혼자 떠드는 사람이 된다.
+        // 본 것은 들고 있다가 말을 걸 때 같이 보낸다. 그래서 평범한
+        // 대화가 '나를 보면서 하는 말' 이 된다.
+        //
+        // 말을 먼저 거는 것은 두 조건이 다 맞을 때만이다 —
+        // 지난번 말한 지 충분히 지났고, 보이는 것이 실제로 달라졌을 때.
+        // ============================================================
+
+        const eyeVideo = document.getElementById('eye-video');
+        const eyeCamBtn = document.getElementById('eye-cam');
+        const eyePhotoBtn = document.getElementById('eye-photo');
+        const eyeFile = document.getElementById('eye-file');
+
+        const eye = {
+            on: false,
+            stream: null,
+            timer: null,
+            busy: false,
+            seen: null,          // 지금 보이는 것
+            seenAt: 0,
+            spokeAt: 0,
+        };
+
+        function visionCfg(key, fallback) {
+            const v = (ENTITY && ENTITY.vision) ? ENTITY.vision[key] : undefined;
+            return (v === undefined || v === null) ? fallback : v;
+        }
+
+        // 지금 보이는 것. 대화를 보낼 때 같이 실어 보낸다.
+        function seeingNow() {
+            return eye.on ? eye.seen : null;
+        }
+
+        // 그림을 긴 변 기준으로 줄여 base64 로 만든다.
+        // 원본을 그대로 보내면 몇 MB 가 되고, 그만큼 보는 것도 느려진다.
+        function shrink(source, w, h) {
+            const max = visionCfg('send_size', 768);
+            const k = Math.min(1, max / Math.max(w, h));
+
+            const c = document.createElement('canvas');
+            c.width = Math.round(w * k);
+            c.height = Math.round(h * k);
+            c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+
+            return c.toDataURL('image/jpeg', 0.82).split(',')[1];
+        }
+
+        // 얼마나 달라졌는가. 0 이면 똑같고 1 이면 완전히 다르다.
+        // 글자를 두 글자씩 잘라 겹치는 비율을 본다 — 문장이 조금 달리
+        // 적혔을 뿐인데 새삼 말을 거는 일을 막으려는 것이다.
+        function howDifferent(a, b) {
+            if (!a || !b) return 1;
+
+            const bag = (s) => {
+                const t = new Set();
+                for (let i = 0; i < s.length - 1; i++) t.add(s.slice(i, i + 2));
+                return t;
+            };
+
+            const A = bag(a), B = bag(b);
+            if (!A.size || !B.size) return 1;
+
+            let same = 0;
+            A.forEach(x => { if (B.has(x)) same++; });
+
+            return 1 - (same / Math.max(A.size, B.size));
+        }
+
+        async function sendImage(b64, message, speak) {
+            if (eye.busy) return null;
+            eye.busy = true;
+
+            try {
+                const res = await fetch('/api/see', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image: b64,
+                        message: message || '',
+                        speak: !!speak,
+                    }),
+                });
+
+                const d = await res.json();
+                if (!d.ok) {
+                    console.warn('[diamondAI] 못 봄:', d.error);
+                    return null;
+                }
+
+                eye.seen = d.seen;
+                eye.seenAt = Date.now();
+
+                return d;
+
+            } catch (e) {
+                console.warn('[diamondAI] 보기 실패:', e);
+                return null;
+            } finally {
+                eye.busy = false;
+            }
+        }
+
+
+        // ------------------------------------------------------------
+        // 사진 보여 주기
+        // ------------------------------------------------------------
+
+        eyePhotoBtn.addEventListener('click', () => eyeFile.click());
+
+        eyeFile.addEventListener('change', () => {
+            const f = eyeFile.files && eyeFile.files[0];
+            eyeFile.value = '';
+            if (!f) return;
+
+            const img = new Image();
+            img.onload = async () => {
+                URL.revokeObjectURL(img.src);
+
+                // 채팅창에 무엇을 보여 줬는지 남긴다
+                const said = (chatInput.value || '').trim();
+                chatInput.value = '';
+                appendMessage('user', said ? said + ' 🖼' : '🖼 (사진을 보여준다)');
+
+                faceUser();
+                if (isSleeping) wakeUp();
+
+                isWaitingForAI = true;
+                const d = await sendImage(
+                    shrink(img, img.naturalWidth, img.naturalHeight),
+                    said, true);
+                isWaitingForAI = false;
+
+                if (!d) {
+                    appendMessage('ai', '(잘 안 보여…)');
+                    return;
+                }
+                showReply(d.reply, d.expression || 'neutral', d.cues);
+            };
+            img.src = URL.createObjectURL(f);
+        });
+
+
+        // ------------------------------------------------------------
+        // 카메라
+        // ------------------------------------------------------------
+
+        async function toggleCamera() {
+            if (eye.on) { stopCamera(); return; }
+
+            try {
+                eye.stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480 }, audio: false,
+                });
+            } catch (e) {
+                appendMessage('ai', '카메라를 못 열었습니다. (' + e.name + ')');
+                return;
+            }
+
+            eyeVideo.srcObject = eye.stream;
+            eyeVideo.classList.add('on');
+            eyeCamBtn.classList.add('on');
+            eye.on = true;
+            eye.spokeAt = Date.now();
+
+            eye.timer = setInterval(lookOnce,
+                visionCfg('look_every_ms', 20000));
+
+            showHint('카메라가 다이아의 눈이 됐습니다', 4000);
+
+            // 켜자마자 한 번 본다. 20초를 기다리게 하지 않는다.
+            setTimeout(lookOnce, 800);
+        }
+
+        function stopCamera() {
+            if (eye.timer) { clearInterval(eye.timer); eye.timer = null; }
+            if (eye.stream) {
+                eye.stream.getTracks().forEach(t => t.stop());
+                eye.stream = null;
+            }
+            eyeVideo.srcObject = null;
+            eyeVideo.classList.remove('on');
+            eyeCamBtn.classList.remove('on');
+            eye.on = false;
+            eye.seen = null;
+
+            showHint('카메라를 껐습니다', 2600);
+        }
+
+        async function lookOnce() {
+            if (!eye.on || eye.busy) return;
+            if (!eyeVideo.videoWidth) return;
+
+            // 말하는 중에는 보지 않는다. 서버가 한 번에 하나만 하게 둔다.
+            if (isWaitingForAI || isSpeaking()) return;
+
+            const before = eye.seen;
+            const now = Date.now();
+
+            const gap = visionCfg('comment_every_ms', 150000);
+            const need = visionCfg('comment_change', 0.45);
+
+            // 먼저 말을 걸 때인가 — 지난번 말한 지 오래됐어야 한다.
+            // 얼마나 달라졌는지는 본 뒤에야 아니까 여기서는 시간만 본다.
+            const maySpeak = !isSleeping && (now - eye.spokeAt > gap);
+
+            const b64 = shrink(eyeVideo,
+                eyeVideo.videoWidth, eyeVideo.videoHeight);
+
+            // 일단 보기만 한다
+            const d = await sendImage(b64, '', false);
+            if (!d) return;
+
+            if (!maySpeak) return;
+
+            // 보이는 것이 달라졌을 때만 말을 건다.
+            // 같은 자리에 같은 자세로 있으면 새삼 말할 것이 없다.
+            if (howDifferent(before, d.seen) < need) return;
+
+            eye.spokeAt = Date.now();
+
+            const said = await sendImage(b64, '(말없이 너를 보고 있다)', true);
+            if (said && said.reply) {
+                faceUser();
+                showReply(said.reply, said.expression || 'neutral', said.cues);
+            }
+        }
+
+        eyeCamBtn.addEventListener('click', toggleCamera);
+
+        // 창을 닫을 때 카메라 불이 켜진 채로 남지 않게
+        window.addEventListener('beforeunload', () => {
+            if (eye.stream) eye.stream.getTracks().forEach(t => t.stop());
+        });
+
+
+        // ============================================================
+        // 귀 — 말을 알아듣는다
+        //
+        // 브라우저가 가진 음성 인식을 쓴다. 서버에 따로 모델을 두지
+        // 않아도 되고 한국어도 된다. 다만 크롬 계열에서만 되고,
+        // 127.0.0.1 이 아니면 https 라야 마이크가 열린다.
+        //
+        // 다 알아들을 때까지 기다리지 않고 **말이 시작된 순간**에도
+        // 쓰임이 있다 — 다이아가 말하는 중이면 거기서 멈춘다.
+        // ============================================================
+
+        const micBtn = document.getElementById('eye-mic');
+
+        const ear = {
+            on: false,
+            rec: null,
+            draft: null,        // 알아듣는 중인 말
+            stopping: false,    // 사람이 끈 것인가 (저절로 끊긴 것과 가른다)
+        };
+
+        function micDraftEl() {
+            if (!ear.draft) {
+                ear.draft = document.createElement('div');
+                ear.draft.id = 'mic-draft';
+                document.body.appendChild(ear.draft);
+            }
+            return ear.draft;
+        }
+
+        function showDraft(text) {
+            const el = micDraftEl();
+            if (!text) { el.style.display = 'none'; return; }
+            el.textContent = text;
+            el.style.display = 'block';
+        }
+
+        function makeRecognizer() {
+            const R = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!R) return null;
+
+            const rec = new R();
+            rec.lang = 'ko-KR';
+            rec.continuous = true;
+            rec.interimResults = true;   // 말이 시작된 순간을 알아야 한다
+
+            rec.onresult = (e) => {
+                let interim = '', done = '';
+
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    const r = e.results[i];
+                    if (r.isFinal) done += r[0].transcript;
+                    else interim += r[0].transcript;
+                }
+
+                // 말이 들리기 시작하면 다이아는 말을 멈춘다.
+                // 사람은 상대가 입을 열면 하던 말을 그만둔다.
+                if (interim || done) interrupt('말');
+
+                showDraft(interim);
+
+                const said = done.trim();
+                if (said) {
+                    showDraft('');
+                    chatInput.value = said;
+                    sendMessage();
+                }
+            };
+
+            rec.onerror = (e) => {
+                if (e.error === 'no-speech' || e.error === 'aborted') return;
+                console.warn('[diamondAI] 듣기 오류:', e.error);
+                if (e.error === 'not-allowed') {
+                    appendMessage('ai', '마이크를 못 열었습니다. 권한을 확인해 주세요.');
+                    stopEar();
+                }
+            };
+
+            // 조용하면 저절로 끊긴다. 사람이 끈 게 아니면 다시 켠다.
+            rec.onend = () => {
+                if (ear.on && !ear.stopping) {
+                    try { rec.start(); } catch (e) {}
+                }
+            };
+
+            return rec;
+        }
+
+        function startEar() {
+            if (ear.on) return;
+
+            ear.rec = ear.rec || makeRecognizer();
+            if (!ear.rec) {
+                appendMessage('ai',
+                    '이 브라우저는 음성 인식을 지원하지 않습니다. '
+                    + '크롬이나 엣지에서 열어 주세요.');
+                return;
+            }
+
+            ear.on = true;
+            ear.stopping = false;
+            micBtn.classList.add('on');
+
+            try { ear.rec.start(); } catch (e) {}
+            showHint('듣고 있습니다 — 말하면 그대로 보냅니다', 3600);
+        }
+
+        function stopEar() {
+            if (!ear.on) return;
+            ear.on = false;
+            ear.stopping = true;
+            micBtn.classList.remove('on');
+            showDraft('');
+            try { ear.rec.stop(); } catch (e) {}
+        }
+
+        micBtn.addEventListener('click', () => ear.on ? stopEar() : startEar());
+
+
+        // ============================================================
+        // 말을 끊고 들어오기
+        //
+        // 지금까지는 다이아가 한 번 말하기 시작하면 끝까지 말했다.
+        // 사람은 상대가 입을 열면 하던 말을 그만둔다.
+        //
+        // 끊긴 것을 기억해 두었다가 다음 답에 알려준다 — 아무 일도
+        // 없었던 것처럼 이어 말하면 끊긴 티가 안 난다.
+        // ============================================================
+
+        let wasCutOff = false;
+
+        function interrupt(how) {
+            if (!isSpeaking()) return false;
+
+            stopLipSync();
+            speechBubble.style.display = 'none';
+            if (bubbleHideTimer) clearTimeout(bubbleHideTimer);
+
+            wasCutOff = true;
+            faceUser();
+
+            // 얼굴은 사이가 정한다. 가까울수록 덜 놀란다.
+            const aff = (typeof myAffinity === 'number') ? myAffinity : 0;
+            applyExpression(aff >= 160 ? 'fun' : 'surprised');
+
+            console.log('[diamondAI] 말이 끊겼다 (' + how + ')');
+            return true;
+        }
+
+        // 글로 끊는 것도 같다. 다이아가 말하는 중에 글자를 치기 시작하면
+        // 그것도 끼어드는 것이다.
+        function watchTyping() {
+            if (!chatInput) return;
+            chatInput.addEventListener('input', () => {
+                if (chatInput.value.length === 1) interrupt('글');
+            });
+        }
+
+
+        watchTyping();
+
+
+        // ============================================================
+        // 시선 — 얼굴이 있는 쪽을 본다
+        //
+        // 카메라가 눈이 됐는데 늘 정면만 보면 눈이 아니다.
+        //
+        // 얼굴을 찾는 데 라이브러리를 쓰지 않는다. 화면을 아주 작게
+        // 줄여 살색에 가까운 점들의 무게중심을 잡는다. 정확하지는
+        // 않지만 '사람이 왼쪽에 있다' 정도는 충분히 알고, 무엇보다
+        // 20초에 한 번이 아니라 매 순간 따라올 수 있다.
+        // ============================================================
+
+        const gaze = {
+            x: 0, y: 0,        // 화면 안 얼굴 자리 -1~1
+            has: false,
+            yaw: 0, pitch: 0,  // 지금 머리가 돌아간 정도(rad)
+            canvas: null,
+        };
+
+        const GAZE_MAX_YAW = 0.42;    // 고개를 좌우로 돌리는 한계(rad)
+        const GAZE_MAX_PITCH = 0.22;  // 위아래
+        const GAZE_FOLLOW = 2.6;      // 따라가는 속도
+
+        function findFace() {
+            if (!eye.on || !eyeVideo.videoWidth) { gaze.has = false; return; }
+
+            if (!gaze.canvas) {
+                gaze.canvas = document.createElement('canvas');
+                gaze.canvas.width = 48;
+                gaze.canvas.height = 36;
+            }
+
+            const c = gaze.canvas;
+            const g = c.getContext('2d', { willReadFrequently: true });
+            g.drawImage(eyeVideo, 0, 0, c.width, c.height);
+
+            let px = 0, py = 0, hits = 0;
+
+            const d = g.getImageData(0, 0, c.width, c.height).data;
+
+            for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+                const r = d[i], gg = d[i + 1], b = d[i + 2];
+
+                // 살색에 가까운가. 빨강이 가장 세고, 파랑이 가장 약하다.
+                const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
+                const ok = r > 70 && gg > 35 && b > 20
+                    && r > gg && gg > b
+                    && (mx - mn) > 14
+                    && Math.abs(r - gg) > 12;
+
+                if (!ok) continue;
+
+                const y = (p / c.width) | 0;
+
+                // 아래쪽 절반은 대개 목과 몸이다. 얼굴 쪽에 힘을 준다.
+                const w = y < c.height * 0.6 ? 2 : 1;
+
+                px += (p % c.width) * w;
+                py += y * w;
+                hits += w;
+            }
+
+            // 너무 적으면 사람이 없는 것으로 본다
+            if (hits < 30) { gaze.has = false; return; }
+
+            gaze.has = true;
+
+            // 화면은 거울로 보여 주지만 좌표는 안 뒤집혀 있다.
+            // 화면에서 오른쪽에 있으면 실제로는 내 왼쪽이므로 뒤집는다.
+            gaze.x = -(((px / hits) / c.width) * 2 - 1);
+            gaze.y = ((py / hits) / c.height) * 2 - 1;
+        }
+
+        function updateGaze(dt) {
+            const wantYaw = (gaze.has && eye.on) ? gaze.x * GAZE_MAX_YAW : 0;
+            const wantPitch = (gaze.has && eye.on) ? gaze.y * GAZE_MAX_PITCH : 0;
+
+            const k = Math.min(1, dt * GAZE_FOLLOW);
+            gaze.yaw += (wantYaw - gaze.yaw) * k;
+            gaze.pitch += (wantPitch - gaze.pitch) * k;
+        }
+
+
         // 목소리를 켜고 끈다.
         function handleVoiceCommand(text) {
 
@@ -6176,7 +6743,21 @@
                             },
 
                             body: JSON.stringify({
-                                message: text
+                                message: text,
+
+                                // 카메라가 켜져 있으면 지금 보이는 것도
+                                // 같이 보낸다. 그래야 평범한 대화가
+                                // '나를 보면서 하는 말' 이 된다.
+                                seeing: seeingNow(),
+
+                                // 방금 말하던 것을 끊고 들어왔는가.
+                                // 아무 일 없었던 것처럼 이어 말하면
+                                // 끊긴 티가 안 난다.
+                                cut_off: (function () {
+                                    const c = wasCutOff;
+                                    wasCutOff = false;
+                                    return c;
+                                })()
                             })
                         }
                     );
