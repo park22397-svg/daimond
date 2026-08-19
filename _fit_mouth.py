@@ -230,8 +230,17 @@ def main():
                 best = (tt, (p[0], p[1] - head_w, p[2]))
         return best[1] if best else None
 
+    # 손이 닿는 범위만 본다.
+    #
+    # 다이아가 서는 거리(follow_near)는 시험할 자리가 아니다 —
+    # 거기서는 손이 아예 안 닿는다(2026-08-19 에 서는 거리를 1.35 로
+    # 물리면서 이 검사가 걸렸다. 판정이 틀린 게 아니라 닿지도 않는
+    # 거리를 재고 있었다).
+    #
+    # 실제로 만질 수 있는 것은 바짝 붙은 자리(personal_space)부터
+    # 손이 닿는 끝(reach)까지다.
     gap = AVATAR.locomotion.get("personal_space", 0.38)
-    near = AVATAR.locomotion.get("follow_near", 0.72)
+    near = AVATAR.locomotion.get("reach", 0.95)
 
     print(f"\n[2] 겨눴을 때 판정구 위 어디에 맞는가  (눈높이 {eye_h})")
     print(f"    자르는 값: mouth_y {cut['mouth_y']} · "
