@@ -635,12 +635,16 @@ def process_chat(user_text, seeing=None, cut_off=False):
     except Exception:
         devotion = 0
 
+    _rel = load_relationship() or {}
+
     system_prompt = AVATAR.system_prompt(
         stage=stage,
         transition=transition,
         devotion=devotion,
         mood=mood_now,
-        lover=bool((load_relationship() or {}).get("lover", False)),
+        lover=bool(_rel.get("lover", False)),
+        # 아이를 가졌다는 것은 몸이 아니라 프롬프트로 드러난다
+        pregnant=bool(_rel.get("pregnant", False)),
     )
     if user_name:
         system_prompt += "\n" + AVATAR.address_block(user_name)
@@ -912,6 +916,7 @@ def keep_talking():
             stage=stage,
             transition=None,
             devotion=AVATAR.devotion_level(saved.get("devotion_raw", 0)),
+            pregnant=bool(saved.get("pregnant", False)),
         ),
     }]
 

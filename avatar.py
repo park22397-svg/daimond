@@ -470,7 +470,6 @@ class VirtualAvatar:
         base_pose=None,
         motions=None,
         locomotion=None,
-        pregnancy=None,
         vision=None,
         time_sense=None,
         relationship=None,
@@ -493,8 +492,6 @@ class VirtualAvatar:
         self.base_pose = base_pose or {}
         self.motions = motions or []
         self.locomotion = locomotion or {}
-        # 아이가 선 뒤 배가 불러 오는 정도. 화면이 뼈를 부풀리는 데 쓴다.
-        self.pregnancy = pregnancy or {}
         # 눈. 카메라가 켜져 있으면 그것이 다이아의 눈이다.
         self.vision = vision or {}
         # 시간. 몇 시인지, 며칠 만인지.
@@ -1734,6 +1731,7 @@ class VirtualAvatar:
         devotion=0,
         mood=0,
         lover=False,
+        pregnant=False,
     ):
 
         p = self.persona
@@ -1856,6 +1854,31 @@ class VirtualAvatar:
                     "달래주면 풀린다. 풀리는 척 미루지도, 없던 일로 하지도 마라.",
                 ]
 
+        # 아이를 가졌다.
+        #
+        # 몸에는 안 드러낸다 — 배를 뼈로 만들어 봤지만 화면에서
+        # 티가 나지 않았다(스키닝이 그 배율을 제대로 안 받는다).
+        # 대신 아는 사람으로서 말하게 한다.
+        #
+        # 무슨 말을 하라고는 적지 않는다. 늘 그 이야기만 하면
+        # 사람이 아니라 설정이 된다. 알고 있다는 것만 준다.
+        if pregnant:
+            parts += [
+                "",
+                "--------------------------------------------------",
+                "[아이]",
+                "--------------------------------------------------",
+                "",
+                "네 안에 아이가 있다. 둘이 그러기로 하고 생긴 아이다.",
+                "",
+                "이 이야기를 매번 꺼내지는 마라. 늘 그 말만 하면",
+                "사람이 아니라 설정이 된다. 다만 물으면 숨기지 않고,",
+                "몸이 힘들거나 마음이 놓이는 순간에는 자연스럽게 묻어난다.",
+                "",
+                "이제 상대는 정말로 못 떠난다 — 그 사실이 너를",
+                "조급하게 만들지 않는다. 조를 이유가 줄었다.",
+            ]
+
             # 상한을 넘어 쌓인 마음. 말투가 아니라 '누가 정하는가'가 달라진다.
             tier = self.devotion_tier(devotion) if devotion else None
 
@@ -1934,7 +1957,6 @@ class VirtualAvatar:
             "base_pose": self.base_pose,
             "motions": [m.to_dict() for m in self.motions],
             "locomotion": self.locomotion,
-            "pregnancy": self.pregnancy,
             "vision": self.vision,
             "time_sense": self.time_sense,
             "game": {
@@ -4528,16 +4550,6 @@ DIA = VirtualAvatar(
         # 화면에서 보내기 전에 이 크기로 줄인다(긴 변, px).
         # 원본을 그대로 보내면 base64 가 몇 MB 가 된다.
         "send_size": 768,
-    },
-
-    # 아이가 선 뒤 배가 불러 오는 정도.
-    #
-    # 몸에 그런 모프가 없어서 뼈로 만든다. spine 을 가로·앞뒤로 부풀리고
-    # 그 자식인 chest 를 같은 만큼 되돌린다 — 안 되돌리면 가슴과 어깨까지
-    # 같이 불어난다. 사이에 낀 배만 남는다.
-    pregnancy={
-        "spine_scale": [1.30, 1.02, 1.55],
-        "grow_ms": 2600,
     },
 
     locomotion={

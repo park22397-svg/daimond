@@ -1231,69 +1231,23 @@
         // 옷만 부르고 몸이 그대로면 배가 옷을 뚫는다.
         // ------------------------------------------------------------
 
-        let pregnant = false;        // 아이가 섰는가
-        let bellyNow = 0;            // 지금 부른 정도 0~1
-        let bellyWant = 0;           // 가려는 곳
-        let bellyOverride = null;    // 시험 창이 밀고 있는 값
+        // 아이가 섰는가.
+        //
+        // 배는 만들지 않는다. spine 을 부풀리고 chest 를 역수로 되돌리는
+        // 방식으로 해 봤는데 화면에서 티가 나지 않았다 — 스키닝이
+        // 그 배율을 제대로 받지 않는다. 모프 없이 뼈만으로 배를
+        // 만들려던 것이 무리였다.
+        //
+        // 그래서 몸은 그대로 두고 **자각만** 남긴다. 아이가 섰다는 것을
+        // 다이아가 알고 있고, 그게 말에 묻어난다(프롬프트의 [아이]).
+        // 눈에 보이는 것보다 그쪽이 이 프로그램에서 더 큰 몫이다.
+        let pregnant = false;
 
-        function pregCfg() {
-            return (ENTITY && ENTITY.pregnancy) || null;
-        }
-
-        function setPregnant(on, instant) {
+        function setPregnant(on) {
             if (pregnant === !!on) return;
             pregnant = !!on;
-            bellyWant = pregnant ? 1 : 0;
-            if (instant) bellyNow = bellyWant;
-
-            console.log('[diamondAI] ' + (pregnant ? '아이가 섰다' : '배를 되돌림'));
+            console.log('[diamondAI] ' + (pregnant ? '아이가 섰다' : '되돌림'));
         }
-
-        function applyBelly(vrm, k) {
-            if (!vrm || !vrm.humanoid) return;
-
-            let spine = null, chest = null;
-            try {
-                spine = vrm.humanoid.getBoneNode('spine');
-                chest = vrm.humanoid.getBoneNode('chest');
-            } catch (e) {}
-            if (!spine) return;
-
-            // 시험 창에서 밀고 있으면 그 값이 먼저다.
-            // 개체가 가진 값은 그대로 두고 화면에서만 바꿔 본다 —
-            // 눈으로 맞춘 뒤에 avatar.py 로 옮겨 적는다.
-            const p = pregCfg();
-            const to = bellyOverride || (p && p.spine_scale)
-                || [1.30, 1.02, 1.55];
-
-            const sx = 1 + (to[0] - 1) * k;
-            const sy = 1 + (to[1] - 1) * k;
-            const sz = 1 + (to[2] - 1) * k;
-
-            spine.scale.set(sx, sy, sz);
-
-            // 위쪽 몸을 같은 만큼 되돌린다.
-            // 이게 없으면 가슴·어깨·머리까지 통째로 부푼다.
-            if (chest) chest.scale.set(1 / sx, 1 / sy, 1 / sz);
-        }
-
-        function updateBelly(dt) {
-            // 시험 창이 열려 있으면 값이 매 프레임 달라질 수 있으므로
-            // 배가 0 이어도 계속 다시 그린다.
-            if (!bellyOverride && bellyNow === bellyWant && bellyNow === 0) return;
-
-            if (bellyNow !== bellyWant) {
-                const p = pregCfg();
-                const ms = (p && p.grow_ms) || 2600;
-                const step = (dt * 1000) / Math.max(200, ms);
-                bellyNow += Math.sign(bellyWant - bellyNow)
-                    * Math.min(step, Math.abs(bellyWant - bellyNow));
-            }
-
-            applyBelly(currentVRM, bellyNow);
-            applyBelly(bodyVRM, bellyNow);
-        }
-
 
         function setFirstPerson(on) {
             user.on = on;
@@ -2687,7 +2641,7 @@
                     // 이때는 부풀어 오르는 시늉 없이 곧바로 그 모습이다 —
                     // 열 때마다 다시 배는 것처럼 보이면 안 된다.
                     if (typeof d.pregnant === 'boolean') {
-                        setPregnant(d.pregnant, true);
+                        setPregnant(d.pregnant);
                     }
 
                     if (typeof d.mood === 'number') {
@@ -3863,7 +3817,7 @@
 
             // 아이가 섰으면 배가 불러 온다
             if (typeof data.pregnant === 'boolean') {
-                setPregnant(data.pregnant, false);
+                setPregnant(data.pregnant);
             }
 
             if (data.pregnant_now) {
@@ -5276,10 +5230,6 @@
             }
 
 
-            // 배는 자세가 다 잡힌 뒤에 부풀린다.
-            // 동작이 매 프레임 뼈를 다시 쓰므로 그보다 나중이어야 한다.
-            updateBelly(deltaTime);
-
             // 옷이 걸어간 만큼 몸도 따라간다
             followBody();
 
@@ -5827,12 +5777,6 @@
                 return true;
             }
 
-            if (t === '/배') {
-                appendMessage('user', text);
-                toggleBellyPanel();
-                return true;
-            }
-
             return false;
         }
 
@@ -5851,7 +5795,7 @@
                     return;
                 }
 
-                setPregnant(d.pregnant, false);
+                setPregnant(d.pregnant);
 
                 myDevotion.level = d.devotion;
                 myDevotion.raw = d.devotion_raw;
@@ -5864,115 +5808,12 @@
                     + '약속     ' + (d.wants_child ? '했다' : '아직')  + '\n'
                     + '절정     ' + d.climax + ' / ' + d.need_climax + '\n'
                     + '쌓인 것  ' + d.strokes + ' / ' + d.need_strokes + '\n'
-                    + '배       ' + (d.pregnant ? '불렀다' : '아직'));
+                    + '아이     ' + (d.pregnant ? '섰다' : '아직'));
 
             } catch (e) {
                 console.warn('[diamondAI] 아이 상태 실패:', e);
                 appendMessage('ai', '맞추지 못했습니다.');
             }
-        }
-
-
-        // ------------------------------------------------------------
-        // 배 시험 창
-        //
-        // 뼈 배율은 화면을 보며 미는 값이라 파일을 고치고 새로 고치는
-        // 방식으로는 못 맞춘다. /rig 와 같은 방식으로 슬라이더를 두고,
-        // 맞춘 값을 avatar.py 에 적을 꼴로 뽑아 준다.
-        // ------------------------------------------------------------
-
-        let bellyPanel = null;
-
-        function toggleBellyPanel() {
-            if (bellyPanel) {
-                bellyPanel.remove();
-                bellyPanel = null;
-                bellyOverride = null;
-                appendMessage('ai', '배 시험 창을 닫았습니다.');
-                return;
-            }
-
-            const p = pregCfg() || {};
-            const cur = (p.spine_scale || [1.30, 1.02, 1.55]).slice();
-
-            bellyPanel = document.createElement('div');
-            bellyPanel.style.cssText =
-                'position:fixed;right:14px;bottom:14px;z-index:40;width:250px;' +
-                'background:rgba(20,22,42,0.94);border:1px solid #3a3f68;' +
-                'border-radius:12px;padding:12px 13px;color:#dfe1f0;' +
-                'font-size:0.8rem;font-family:inherit;user-select:none';
-
-            const axes = [
-                ['가로', 0, 1.0, 2.2],
-                ['위아래', 1, 0.8, 1.4],
-                ['앞뒤', 2, 1.0, 2.4],
-            ];
-
-            let html = '<b>배 — spine 배율</b>'
-                + '<div style="opacity:.6;margin:3px 0 9px">'
-                + 'chest 는 역수로 되돌려 위쪽 몸은 그대로 둔다</div>';
-
-            axes.forEach(([label, i, lo, hi]) => {
-                html += '<div style="margin:7px 0 2px">' + label
-                    + ' <span id="bv' + i + '">' + cur[i].toFixed(2)
-                    + '</span></div>'
-                    + '<input type="range" id="bs' + i + '" style="width:100%"'
-                    + ' min="' + lo + '" max="' + hi + '" step="0.01"'
-                    + ' value="' + cur[i] + '">';
-            });
-
-            html += '<div style="margin:9px 0 2px">부른 정도'
-                + ' <span id="bvk">1.00</span></div>'
-                + '<input type="range" id="bsk" style="width:100%"'
-                + ' min="0" max="1" step="0.02" value="1">'
-                + '<button id="bcopy" style="width:100%;margin-top:10px;'
-                + 'padding:6px;border-radius:8px;background:#4a3f77;'
-                + 'border:1px solid #7a68b0;color:#dfe1f0;cursor:pointer;'
-                + 'font-family:inherit">avatar.py 에 적을 꼴로 복사</button>'
-                + '<div style="opacity:.6;margin-top:7px">/배 로 닫는다</div>';
-
-            bellyPanel.innerHTML = html;
-            document.body.appendChild(bellyPanel);
-
-            bellyOverride = cur;
-            bellyNow = 1;
-            bellyWant = 1;
-
-            const push = () => {
-                axes.forEach(([, i]) => {
-                    const v = parseFloat(
-                        document.getElementById('bs' + i).value);
-                    cur[i] = v;
-                    document.getElementById('bv' + i).textContent = v.toFixed(2);
-                });
-                bellyOverride = cur.slice();
-            };
-
-            axes.forEach(([, i]) => {
-                document.getElementById('bs' + i)
-                    .addEventListener('input', push);
-            });
-
-            document.getElementById('bsk').addEventListener('input', (e) => {
-                const k = parseFloat(e.target.value);
-                document.getElementById('bvk').textContent = k.toFixed(2);
-                bellyNow = k;
-                bellyWant = k;
-            });
-
-            document.getElementById('bcopy').addEventListener('click', () => {
-                const txt = 'pregnancy={\n'
-                    + '    "spine_scale": [' + cur.map(v => v.toFixed(2)).join(', ') + '],\n'
-                    + '    "grow_ms": ' + (p.grow_ms || 2600) + ',\n'
-                    + '},';
-                navigator.clipboard.writeText(txt).catch(() => {});
-                appendMessage('ai', txt);
-            });
-
-            appendMessage('ai',
-                '배 시험 창을 열었습니다. 슬라이더로 맞춘 뒤 복사해서 '
-                + 'avatar.py 의 pregnancy 에 적으세요.\n'
-                + '창을 닫으면 개체가 가진 값으로 돌아갑니다.');
         }
 
 
@@ -6496,7 +6337,6 @@
 /절정 <숫자>   절정 횟수 맞추기 (5 면 다음 절정에 아이가 선다)
 /임신          바로 아이가 서게
 /임신 취소     되돌리기
-/배            배 모양 슬라이더 창
 
 /기억삭제  (되돌릴 수 없음)
 
