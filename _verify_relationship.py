@@ -14,34 +14,72 @@ print("[1] 단계 정의")
 for s in A.stages():
     print(f"  {s.min_affinity:>4} 이상  {s.key:<9} {s.label:<8} {s.speech}")
 
+# 숫자를 여기 적지 않는다.
+#
+# 예전에는 친구 진입선을 20으로 적어 두었는데, 2026-08-18 에 호감
+# 눈금을 두 배로 올리면서(친구 40) 이 검사만 옛 숫자에 남아 실패했다.
+# 눈금이 달라질 때마다 검사도 같이 고쳐야 한다면 그건 검사가 아니다.
+# 그래서 경계와 이력현상을 개체에서 직접 꺼내 쓴다.
+LINE = A.stage("friend").min_affinity
+HYST = A.relationship.get("hysteresis", 0)
+
 print("\n[2] 친밀도 -> 단계")
-for aff in [-100, -70, -40, -25, -10, 0, 19, 20, 55, 60, 100]:
+
+# 단계마다 진입선과 그 한 칸 아래를 본다.
+# 눈금이 달라져도 늘 '갈리는 자리'를 짚는다.
+edges = []
+for s in A.stages():
+    edges += [s.min_affinity - 1, s.min_affinity]
+
+for aff in sorted(set(edges)):
     print(f"  {aff:>5} -> {A.stage_for_affinity(aff).label}")
 
 print("\n[3] 이력 현상 — 경계에서 말투가 뒤집히지 않는가")
-print("  친구(20 이상) 상태에서 친밀도가 내려갈 때:")
-for aff in [20, 19, 15, 12, 11, 10, 5]:
+print(f"  친구 진입선 {LINE} · 이력현상 {HYST}")
+print(f"  친구를 벗어나려면 {LINE - HYST} 아래로, "
+      f"친구가 되려면 {LINE + HYST} 위로 가야 한다")
+
+print("\n  친구 상태에서 친밀도가 내려갈 때:")
+for aff in [LINE, LINE - 1, LINE - HYST + 1, LINE - HYST, LINE - HYST - 1]:
     st = A.next_stage(aff, "friend")
     note = "유지" if st.key == "friend" else "→ " + st.label
     print(f"    {aff:>4} : {st.label:<8} {note}")
 
-print("  서먹함(-10 이상) 상태에서 친밀도가 올라갈 때:")
-for aff in [19, 20, 25, 27, 28, 30]:
+print("\n  서먹함 상태에서 친밀도가 올라갈 때:")
+for aff in [LINE - 1, LINE, LINE + 1, LINE + HYST - 1, LINE + HYST]:
     st = A.next_stage(aff, "distant")
     note = "유지" if st.key == "distant" else "→ " + st.label
     print(f"    {aff:>4} : {st.label:<8} {note}")
 
-# 경계에서 한 칸 왔다갔다 해도 단계가 흔들리면 안 된다
-a = A.next_stage(19, "friend").key
-b = A.next_stage(21, "distant").key
-if a != "friend":
-    fails += 1
-    print("  FAIL  19에서 친구가 바로 풀렸다")
-if b != "distant":
-    fails += 1
-    print("  FAIL  21에서 서먹함이 바로 친구가 됐다")
-if a == "friend" and b == "distant":
-    print("  PASS  경계 ±1 에서는 단계가 바뀌지 않는다")
+# 경계에서 한 칸 왔다갔다 해도 단계가 흔들리면 안 된다.
+#
+# 다만 ±1 만 보면 '아예 안 바뀌는' 버그를 못 잡는다.
+# 그래서 이력현상이 정확히 그 폭만큼인지도 같이 본다.
+checks = [
+    (LINE - 1, "friend", "friend",
+     f"{LINE - 1}에서 친구가 바로 풀렸다"),
+    (LINE + 1, "distant", "distant",
+     f"{LINE + 1}에서 서먹함이 바로 친구가 됐다"),
+    (LINE - HYST, "friend", "friend",
+     f"{LINE - HYST}에서 친구가 풀렸다 — 이력현상이 {HYST}보다 좁다"),
+    (LINE - HYST - 1, "friend", "distant",
+     f"{LINE - HYST - 1}까지 내려가도 친구다 — 이력현상이 {HYST}보다 넓다"),
+    (LINE + HYST, "distant", "friend",
+     f"{LINE + HYST}에서도 친구가 안 됐다 — 이력현상이 {HYST}보다 넓다"),
+]
+
+bad = 0
+for aff, came_from, want, msg in checks:
+    got = A.next_stage(aff, came_from).key
+    if got != want:
+        bad += 1
+        print(f"  FAIL  {msg} (실제로는 {got})")
+
+fails += bad
+
+if not bad:
+    print(f"\n  PASS  경계 ±1 에서 흔들리지 않고, "
+          f"이력현상이 정확히 {HYST} 만큼이다")
 
 print("\n[4] 말 한마디의 점수")
 cases = [

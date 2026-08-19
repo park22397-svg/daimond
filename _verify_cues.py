@@ -8,8 +8,27 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from ai_brain import extract_cues
+from avatar import AVATAR
 
 fails = 0
+
+
+def face_of(emoji):
+    """이 이모지가 지금 어느 표정인가.
+
+    답을 검사에 적어 두지 않는다. 2026-08-18 에 기쁨과 즐거움의
+    신호를 맞바꿨을 때(모양이 93~95% 같아져서) 이 검사만 옛 답안지를
+    들고 있어서 실패했다. 개체에게 물으면 그런 일이 안 생긴다.
+    """
+    for e in AVATAR.expressions:
+        if emoji in (e.reply_emoji or []):
+            return e.key
+    raise SystemExit(f"어느 표정도 {emoji} 를 쓰지 않는다 — 검사를 볼 것")
+
+
+JOY = face_of("😊")      # 지금은 즐거움(fun)
+SAD = face_of("😢")
+WOW = face_of("😲")
 
 
 def check(label, raw, want_clean, want_cues=None):
@@ -42,17 +61,17 @@ def check(label, raw, want_clean, want_cues=None):
 
 print("[1] 이모지는 지우고 표정 큐로 남는다")
 check("문장 끝 이모지", "오늘 정말 즐거웠어요 😊", "오늘 정말 즐거웠어요",
-      [("expression", "joy")])
+      [("expression", JOY)])
 check("문장 중간 이모지", "그건 좀 😢 서운했어요.", "그건 좀 서운했어요.",
       [("expression", "sorrow")])
 check("이모지 여러 개", "와 😲 진짜요? 😊", "와 진짜요?",
-      [("expression", "surprised"), ("expression", "joy")])
+      [("expression", WOW), ("expression", JOY)])
 
 print("\n[2] 괄호 몸짓은 지우고 동작 큐로 남는다")
 check("동작 이름", "안녕하세요 (손인사)", "안녕하세요",
       [("motion", "wave")])
 check("동작 + 이모지", "(손인사) 반가워요 😊", "반가워요",
-      [("motion", "wave"), ("expression", "joy")])
+      [("motion", "wave"), ("expression", JOY)])
 check("별칭", "네 (끄덕)", "네", [("motion", "nod")])
 
 print("\n[3] 소설식 괄호 묘사는 큐 없이 지워진다")

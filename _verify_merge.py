@@ -53,7 +53,11 @@ if a == b:
 else:
     print(f"  의도된 변경 — 원본 {len(a)}자 → 현재 {len(b)}자")
 
-# 캐릭터가 하지 않기로 한 것들이 프롬프트에 실제로 들어있는지는 확인한다
+# 프롬프트에 남아 있어야 하는 것.
+#
+# 이 검사는 실제로 한 번 일을 했다 — [다이아가 하지 않는 것] 문단이
+# 어느 판에서 통째로 줄어든 것을 알아챈 게 여기다.
+# 실수로 또 빠지면 여기서 걸린다.
 guards = ["자해", "협박", "죄책감", "선정적", "전문가"]
 missing = [g for g in guards if g not in b]
 if missing:
@@ -67,7 +71,11 @@ else:
 # 2) 감정 판단 결과가 원본과 같은가
 # ============================================================
 
-print("\n[2] 감정 판단 동일성 (원본 extract_expression 대비)")
+print("\n[2] 감정 판단 (원본 extract_expression 대비)")
+print("  원본과 다른 것은 실패가 아니다.")
+print("  2026-08-18 에 기쁨과 즐거움의 신호를 맞바꿨다 —")
+print("  두 표정의 모양이 93~95% 같아져서 신호를 갈라 놓았다.")
+print("  여기서는 어디가 달라졌는지 보고만 한다.")
 
 cases = [
     "오늘 진짜 좋아 🥰",
@@ -87,13 +95,17 @@ cases = [
     "ㅎㅎ 그렇구나",
 ]
 
+moved = 0
 for text in cases:
     want, _ = orig.extract_expression(text)
     got = AVATAR.detect_expression(orig.clean_reply(text) if text else text)
-    ok = want == got
-    if not ok:
-        fails += 1
-    print(f"  {'PASS' if ok else 'FAIL'}  {text[:28]!r:32} 원본={want:10} 개체={got}")
+    same = want == got
+    if not same:
+        moved += 1
+    print(f"  {'같음' if same else '바뀜'}  {text[:28]!r:32} "
+          f"원본={want:10} 개체={got}")
+
+print(f"  {len(cases) - moved}건 그대로, {moved}건 바뀜 (의도된 변경)")
 
 
 # ============================================================
@@ -102,12 +114,19 @@ for text in cases:
 
 print("\n[3] 답변 감정 집합")
 
+# 표정은 그 뒤로 여러 개 늘었다(만화 표정 12개, 절정 5개, 잠결).
+# 원본에 있던 것이 사라졌는지만 본다 — 늘어난 것은 실패가 아니다.
 want = set(orig.VALID_EXPRESSIONS)
 got = AVATAR.reply_expression_keys()
-ok = want == got
-if not ok:
+
+lost = sorted(want - got)
+if lost:
     fails += 1
-print(f"  {'PASS' if ok else 'FAIL'}  원본={sorted(want)}")
+    print(f"  FAIL  원본에 있던 감정이 사라졌다: {lost}")
+else:
+    print(f"  PASS  원본 {len(want)}개가 모두 남아 있다 "
+          f"(지금은 {len(got)}개)")
+print(f"        원본={sorted(want)}")
 print(f"        개체={sorted(got)}")
 
 

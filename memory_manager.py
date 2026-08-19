@@ -428,7 +428,9 @@ def load_relationship():
     return rel
 
 
-def save_relationship(affinity, stage_key, devotion_raw=None, lover=None):
+def save_relationship(affinity, stage_key, devotion_raw=None, lover=None,
+                      wants_child=None, strokes=None, climax=None,
+                      pregnant=None):
     """관계 상태를 저장한다.
 
     lover 는 고백을 주고받았는지다. 그 전에는 호감이 광기 앞에서 멈춘다.
@@ -453,11 +455,32 @@ def save_relationship(affinity, stage_key, devotion_raw=None, lover=None):
     if lover is None:
         lover = before.get("lover", False)
 
+    # 아이에 관한 것 넷.
+    #
+    #   wants_child : 아이를 갖겠다고 말했는가
+    #   strokes     : 절정까지 얼마나 왔는가. 절정마다 0으로 돌아간다
+    #   climax      : 절정을 몇 번 겪었는가
+    #   pregnant    : 아이가 섰는가
+    #
+    # 적지 않고 부르면 이미 쌓인 값을 그대로 둔다.
+    if wants_child is None:
+        wants_child = before.get("wants_child", False)
+    if strokes is None:
+        strokes = before.get("strokes", 0)
+    if climax is None:
+        climax = before.get("climax", 0)
+    if pregnant is None:
+        pregnant = before.get("pregnant", False)
+
     data["relationship"] = {
         "affinity": int(affinity),
         "stage": str(stage_key),
         "devotion_raw": int(devotion_raw),
         "lover": bool(lover),
+        "wants_child": bool(wants_child),
+        "strokes": int(strokes),
+        "climax": int(climax),
+        "pregnant": bool(pregnant),
     }
 
     save_memory_data(data)

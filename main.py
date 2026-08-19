@@ -353,6 +353,11 @@ def relationship_api():
                 "devotion_label": tier.get("label") if tier else None,
                 # 연인인가. 아니면 호감이 광기 앞에서 멈춘다.
                 "lover": bool(saved.get("lover", False)),
+
+                # 아이. 창을 다시 열어도 배가 그대로여야 한다.
+                "wants_child": bool(saved.get("wants_child", False)),
+                "climax": int(saved.get("climax", 0)),
+                "pregnant": bool(saved.get("pregnant", False)),
                 "ceiling": AVATAR.confess_ceiling(),
                 # 지금 상해 있는가
                 "mood": mood,
@@ -390,7 +395,7 @@ def touch_api():
     받는 값:
       bone   : 닿은 지점에서 가장 가까운 본 이름
       local  : 그 본의 좌표계에서의 닿은 위치 [x, y, z] (머리 나누기에 쓴다)
-      kind   : "tap" 한 번 누름 / "pet" 쓰다듬기
+      kind   : "tap" 한 번 누름 / "pet" 쓰다듬기 / "kiss" 입맞춤
       count  : 쓰다듬은 횟수
     """
 
@@ -411,6 +416,11 @@ def touch_api():
         bone = data.get("bone")
         local = data.get("local")
         kind = "pet" if data.get("kind") == "pet" else "tap"
+
+        # 화면은 '눈을 감고 기다리는 중이었다' 만 알려준다(kiss_ready).
+        # 그것이 정말 입맞춤인지는 아래에서 자리와 도구를 안 뒤에 정한다 —
+        # 어느 자리를 만졌는지 아는 쪽은 화면이 아니라 여기다.
+        kiss_ready = bool(data.get("kiss_ready"))
         count = int(data.get("count") or 1)
 
         saved = load_relationship() or {}
@@ -444,6 +454,39 @@ def touch_api():
                 }
             )
 
+        # 기다리고 있었고, 그 도구로 그 자리를 만졌다면 입맞춤이다.
+        # 셋 중 하나라도 어긋나면 평소대로 누른 것이 된다.
+        if kiss_ready and kind == "tap":
+            kc = AVATAR.touch.get("kiss", {})
+            if (kc.get("enabled")
+                    and tool is not None
+                    and tool.key == kc.get("tool")
+                    and zone.key == kc.get("zone")):
+                kind = "kiss"
+
+        # ----------------------------------------------------------
+        # 몸을 섞는 것
+        #
+        # 손가락은 입과 보지에서만 다른 것이 된다(TouchTool.label_for).
+        # 그 자리를 그 도구로, 하의를 벗긴 채로 만졌을 때만이다.
+        #
+        # 화면은 무엇을 벗겼는지만 보낸다(undressed).
+        # 어느 자리를 만졌는지 아는 쪽이 여기라서 판정은 여기서 한다.
+        # ----------------------------------------------------------
+        sx = AVATAR.sex_conf()
+
+        undressed = data.get("undressed")
+        if not isinstance(undressed, list):
+            undressed = []
+
+        is_sex = bool(
+            sx.get("enabled")
+            and tool is not None
+            and tool.key == sx.get("tool")
+            and zone.key == sx.get("zone")
+            and all(z in undressed for z in sx.get("needs_undressed", []))
+        )
+
         result = AVATAR.touch_reaction(
             zone,
             kind,
@@ -455,6 +498,55 @@ def touch_api():
 
         if result is None:
             return jsonify({"hit": False, "bone": bone})
+
+        # ----------------------------------------------------------
+        # 절정
+        #
+        # 한 번 만질 때마다 하나씩 쌓이고, 문턱을 넘으면 절정에 이른다.
+        # 넘은 뒤에는 0으로 돌아간다.
+        #
+        # 절정을 정해진 횟수만큼 겪고, 그 전에 아이를 갖겠다고 말한
+        # 뒤라면 아이가 선다. 말한 적이 없으면 몇 번을 겪어도 서지 않는다 —
+        # 이것은 몸이 아니라 약속이 정하는 일이다.
+        #
+        # 세는 값을 저장에 두는 이유: 창을 닫았다 열어도 이어져야 한다.
+        # ----------------------------------------------------------
+        sex_strokes = None
+        sex_climax = None
+        sex_pregnant = None
+
+        if is_sex and result.get("allowed"):
+            sex_strokes = int(saved.get("strokes", 0)) + 1
+            sex_climax = int(saved.get("climax", 0))
+            sex_pregnant = bool(saved.get("pregnant", False))
+            wants = bool(saved.get("wants_child", False))
+
+            result["kind"] = "sex"
+
+            if sex_strokes >= int(sx.get("climax_strokes", 8)):
+                sex_strokes = 0
+                sex_climax += 1
+
+                peak = AVATAR.climax_reaction(stage)
+                result["reply"] = peak["reply"]
+                result["expression"] = peak["expression"]
+                result["motion"] = peak["motion"]
+                result["expression_then"] = None
+                result["affinity_delta"] = int(sx.get("climax_affinity", 10))
+                result["climaxed"] = True
+
+                if (not sex_pregnant and wants
+                        and sex_climax >= int(sx.get("to_pregnant", 5))):
+                    sex_pregnant = True
+                    result["pregnant_now"] = True
+                    print(f"[아이]: 절정 {sex_climax}번 — 아이가 섰습니다.")
+                else:
+                    print(f"[절정]: {sex_climax}번째"
+                          f"{'' if wants else ' (아이를 갖겠다는 말은 아직 없다)'}")
+
+            result["strokes"] = sex_strokes
+            result["climax"] = sex_climax
+            result["pregnant"] = sex_pregnant
 
         # 옷을 여러 번 잡아당기면 옷이 실제로 끌려온다.
         # 한두 번은 말로만 하고, 그 뒤부터 몸이 따라간다.
@@ -547,7 +639,10 @@ def touch_api():
 
         try:
             save_relationship(affinity, stage.key, devotion_raw,
-                              bool(saved.get("lover", False)))
+                              bool(saved.get("lover", False)),
+                              strokes=sex_strokes,
+                              climax=sex_climax,
+                              pregnant=sex_pregnant)
         except Exception as e:
             print(f"[만지기 관계 저장 오류]: {e}")
 
@@ -576,6 +671,9 @@ def touch_api():
                 "stage": stage.key,
                 "stage_label": stage.label,
                 "changed_from": before if before != stage.key else None,
+                "pregnant": bool(
+                    sex_pregnant if sex_pregnant is not None
+                    else saved.get("pregnant", False)),
             }
         )
 

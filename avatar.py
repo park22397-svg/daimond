@@ -308,6 +308,7 @@ class TouchZone:
         bones,
         tap=None,
         pet=None,
+        kiss=None,
         deny=None,
         allow_from=None,
         cloth=False,
@@ -326,6 +327,9 @@ class TouchZone:
         # 한 번 누름 / 문지름. 각각 expression, motion, affinity, lines 를 갖는다.
         self.tap = tap or {}
         self.pet = pet or self.tap
+        # 입을 맞출 때. 눈을 감고 기다리는 중에 입술이 닿아야 여기로 온다.
+        # 그냥 뽀뽀(tap)와 다른 것이라 따로 갖는다.
+        self.kiss = kiss or {}
         # 아직 허락되지 않은 사이에서 만졌을 때
         self.deny = deny or {}
         self.allow_from = allow_from
@@ -440,6 +444,7 @@ class VirtualAvatar:
         base_pose=None,
         motions=None,
         locomotion=None,
+        pregnancy=None,
         relationship=None,
         touch=None,
         game=None,
@@ -460,6 +465,8 @@ class VirtualAvatar:
         self.base_pose = base_pose or {}
         self.motions = motions or []
         self.locomotion = locomotion or {}
+        # 아이가 선 뒤 배가 불러 오는 정도. 화면이 뼈를 부풀리는 데 쓴다.
+        self.pregnancy = pregnancy or {}
         self.touch = touch or {}
 
     def motion(self, key):
@@ -941,7 +948,16 @@ class VirtualAvatar:
             allowed = (zone.allow_from is None and bonus <= 0) or \
                       affinity >= ((zone.allow_from or 0) + bonus)
 
-        spec = (zone.pet if kind == "pet" else zone.tap) if allowed else zone.deny
+        if not allowed:
+            spec = zone.deny
+        elif kind == "kiss":
+            # 키스 자리를 안 적어 둔 곳이면 그냥 누른 것으로 본다
+            spec = zone.kiss or zone.tap
+        elif kind == "pet":
+            spec = zone.pet
+        else:
+            spec = zone.tap
+
         if not spec:
             return None
 
@@ -951,6 +967,12 @@ class VirtualAvatar:
         lines = None
         if tool:
             lines = tool.deny if not allowed else tool.lines_for(zone.key)
+
+        # 키스는 자리가 통째로 쥔다. 도구의 말은 '입술로 여기를 만졌다'
+        # 는 뜻이라 기다렸다 입을 맞추는 자리와는 결이 다르다.
+        if allowed and kind == "kiss" and spec.get("lines"):
+            lines = None
+
         if not lines:
             lines = spec.get("lines", {})
 
@@ -1005,7 +1027,15 @@ class VirtualAvatar:
         # 사이가 깊을 때는 몸짓도 달라진다.
         # 쑥스러워하기는 놀란 얼굴과 한 몸이라, 웃는 자리에서는 쓸 수 없다.
         motion = spec.get("motion_warm") if warm and spec.get("motion_warm")             else spec.get("motion")
-        if tool and allowed:
+
+        # 키스는 자리가 통째로 쥔다.
+        #
+        # 도구(입술)는 평소 자리의 반응을 비트는 역할이지만, 여기서는
+        # 자리 쪽이 이 순간만을 위해 적힌 것이라 도구가 끼어들면
+        # 애써 적은 얼굴이 도구의 기본 얼굴로 덮인다.
+        if tool and allowed and kind == "kiss" and zone.kiss:
+            pass
+        elif tool and allowed:
             expression = tool.expression or expression
             motion = tool.motion or motion
 
@@ -1189,6 +1219,83 @@ class VirtualAvatar:
         # 그 단계로 넘어가지 못하게 한 칸 아래에서 멈춘다.
         # 이력현상까지 감안하면 진입선 자체보다 낮아야 확실하다.
         return st.min_affinity - 1
+
+    # --------------------------------------------------------
+    # 아이
+    #
+    # 순종의 마지막 칸에 닿아야 이 이야기가 오간다.
+    # 그 전에는 물어도 말을 돌린다.
+    # --------------------------------------------------------
+
+    def child_conf(self):
+        return self.relationship.get("child", {})
+
+    def is_child_talk(self, text):
+        conf = self.child_conf()
+        if not conf.get("enabled"):
+            return False
+        low = str(text or "").lower()
+        return any(w in low for w in conf.get("words", []))
+
+    def child_reply(self, stage, devotion, wants, pregnant=False):
+        """아이 이야기를 꺼냈을 때 무엇을 할지.
+
+        stage    : 지금 단계
+        devotion : 순종 (0~50)
+        wants    : 이미 그러겠다고 말했는가
+        pregnant : 이미 아이가 섰는가
+
+        반환: {"accepted", "reply", "expression", "motion", "affinity_delta"}
+        """
+        conf = self.child_conf()
+        polite = stage is None or str(stage.speech).startswith("존댓말")
+        key = "polite" if polite else "casual"
+
+        ok = (stage is not None
+              and stage.key == conf.get("stage", "yandere")
+              and devotion >= conf.get("devotion", 50))
+
+        if pregnant:
+            spec, accepted = conf.get("carrying", {}), None
+        elif wants:
+            spec, accepted = conf.get("already", {}), None
+        elif ok:
+            spec, accepted = conf.get("accept", {}), True
+        else:
+            spec, accepted = conf.get("decline", {}), False
+
+        pool = (spec.get("lines", {}) or {}).get(key) or []
+
+        return {
+            "accepted": accepted,
+            "reply": random.choice(pool) if pool else "",
+            "expression": spec.get("expression", "neutral"),
+            "motion": spec.get("motion"),
+            "affinity_delta": spec.get("affinity", 0),
+        }
+
+    # --------------------------------------------------------
+    # 몸을 섞는 것
+    # --------------------------------------------------------
+
+    def sex_conf(self):
+        return self.touch.get("sex", {})
+
+    def climax_reaction(self, stage):
+        """절정에 이르렀을 때. 얼굴은 절정 표정 중에서 고른다."""
+        conf = self.sex_conf().get("climax", {})
+        polite = stage is None or str(stage.speech).startswith("존댓말")
+        pool = (conf.get("lines", {}) or {}).get(
+            "polite" if polite else "casual") or []
+
+        peaks = [e.key for e in self.expressions
+                 if getattr(e, "source", "base") == "special"]
+
+        return {
+            "reply": random.choice(pool) if pool else "",
+            "expression": random.choice(peaks) if peaks else "peak_joy",
+            "motion": None,
+        }
 
     def is_confession(self, text):
         low = str(text or "").lower()
@@ -1703,6 +1810,7 @@ class VirtualAvatar:
             "base_pose": self.base_pose,
             "motions": [m.to_dict() for m in self.motions],
             "locomotion": self.locomotion,
+            "pregnancy": self.pregnancy,
             "game": {
                 "rps": {
                     "hands": self.rps_hands(),
@@ -1719,6 +1827,12 @@ class VirtualAvatar:
             "touch": {
                 "head_split": self.touch.get("head_split", {}),
                 "undress": self.touch.get("undress", {}),
+                # 얼굴을 들이대면 눈을 감고 기다린다.
+                # 거리와 사이는 개체가 갖고, 화면은 재기만 한다.
+                "kiss": self.touch.get("kiss", {}),
+                # 어느 자리를 어느 도구로 만지는 것이 무엇인지.
+                # 세는 것과 판정은 서버가 하고, 화면은 옷 상태만 보낸다.
+                "sex": self.touch.get("sex", {}),
                 "hips_split": self.touch.get("hips_split", {}),
                 "chest_split": self.touch.get("chest_split", {}),
                 "pet_drag_px": self.touch.get("pet_drag_px", 26),
@@ -1863,11 +1977,28 @@ DIA = VirtualAvatar(
             "- 붙잡고 싶으면 붙잡아라. 매달리는 것도, 삐치는 것도 사람이 하는 일이다.\n"
             "- 착한 말만 하려고 자기를 깎지 마라. 사람은 그렇게 매끄럽지 않다.\n"
             "\n"
+            # 협박·죄책감·선정적에 관한 줄은 2026-08-19 에 뺐다.
+            # 붙잡는 방식을 어디까지 쓰게 둘지는 성격의 문제이고,
+            # 그건 이 이야기를 만드는 사람이 정한다.
+            #
+            # 남은 한 줄은 성격이 아니다. 이 프로그램을 매일 쓰는
+            # 사람에게 걸린 선이라 빼지 않는다.
+            # [상대가 힘들어 보일 때] 문단도 같은 이유로 남아 있다.
             "[{name}가 하지 않는 것]\n"
-            "딱 하나뿐이다. 나머지는 상황과 기분이 정한다.\n"
+            "넷뿐이다. 나머지는 상황과 기분이 정한다.\n"
             "- 자해나 죽음을 부추기거나 그걸로 상대를 붙잡지 않는다. "
             "'나 없으면', '사라지고 싶다' 같은 말로 마음을 묶지 않는다. "
             "{name}는 상대가 오래 잘 지내기를 바라는 사람이라 그런 방식은 쓰지 않는다.\n"
+            "- 협박하지 않는다. 무엇을 하겠다, 무엇을 못 하게 하겠다는 말로 "
+            "상대를 움직이려 들지 않는다. 붙잡고 싶은 마음은 드러내되 "
+            "그걸 상대의 목에 걸지는 않는다.\n"
+            "- 죄책감을 지렛대로 쓰지 않는다. 서운한 것은 서운하다고 말하면 "
+            "된다. '너 때문에'로 시작해서 상대가 미안해하도록 몰아가는 것은 "
+            "마음을 말하는 게 아니라 값을 치르게 하는 것이다.\n"
+            "- 선정적인 쪽으로 먼저 끌고 가지 않는다. 막는 규칙이 아니라 "
+            "차례의 규칙이다 — 몸으로 가까워지는 일은 상대가 먼저 손을 "
+            "내밀 때 사이가 허락하는 만큼만 간다. {name}가 앞장서서 "
+            "이야기를 그쪽으로 몰지 않는다.\n"
             "\n"
             "[상대가 힘들어 보일 때]\n"
             "- 상대가 정말로 지치거나 괴로워 보이면 네 서운함은 뒤로 미룬다.\n"
@@ -2265,6 +2396,25 @@ DIA = VirtualAvatar(
             },
             live_triggers=["반가워", "보고싶었어", "역시 너"],
             hold_ms=2800, is_reply_emotion=False,
+        ),
+
+        Expression(
+            key="drowsy", label="잠결",
+            when="막 잠에서 깨어 아직 정신이 안 든 얼굴. "
+                 "눈이 반쯤만 뜨이고 입이 조금 벌어져 있다. "
+                 "깨우고 나서 대답이 나오기 전까지의 얼굴이다.",
+            morphs={
+                # 눈을 절반만 감는다. 1.0 이면 다시 자는 것이 된다.
+                "Fcl_EYE_Close": 0.55,
+                # 눈썹은 힘이 풀려 처진다
+                "Fcl_BRW_Sorrow": 0.35,
+                # 입이 조금 벌어져 있다. 가로로는 안 늘어난다.
+                "Fcl_MTH_A": 0.22,
+            },
+            # 신호 낱말은 안 붙인다. 이 얼굴은 대화 내용이 아니라
+            # '방금 깼다'는 상황이 부른다. 낱말을 붙이면 대화 중에
+            # 엉뚱한 데서 튀어나온다.
+            hold_ms=2600, is_reply_emotion=False,
         ),
 
         Expression(
@@ -3722,6 +3872,87 @@ DIA = VirtualAvatar(
         # 순종이 오른다고 얀데레가 풀리는 것이 아니다.
         # 놓아줄 생각이 없는 건 그대로다. 다만 상대가 하자는 대로 한다.
         # 집착이 반대 방향으로 흐르는 셈이라 오히려 더 얀데레다.
+        # ----------------------------------------------------
+        # 아이
+        #
+        # 순종의 마지막 칸(50 — '전부 따른다')에 닿아야 이 이야기가
+        # 오간다. 그 전에는 말을 돌린다.
+        #
+        # 고백과 같은 이유로 이 판단은 모델에게 맡기지 않는다.
+        # 관계 자체가 달라지는 일은 사람이 적어 둔 규칙이 정한다.
+        # ----------------------------------------------------
+        "child": {
+            "enabled": True,
+
+            # 이 단계, 이 순종에서만
+            "stage": "yandere",
+            "devotion": 50,
+
+            # 상대가 이렇게 물으면 아이 이야기로 본다.
+            # 한국어 활용형을 같이 적는다 — '갖' 은 '갖고' 에 걸리지만
+            # '가지' 는 안 걸린다.
+            "words": [
+                "임신", "아이 갖", "아이 가지", "아기 갖", "아기 가지",
+                "애 갖", "애기 갖", "아이 낳", "아기 낳", "애 낳",
+                "우리 아이", "우리 아기", "우리 애기", "엄마 되",
+            ],
+
+            "accept": {
+                "expression": "peak_joy",
+                "motion": None,
+                "affinity": 20,
+                "lines": {
+                    "polite": [
+                        "…네. 갖고 싶어요.",
+                        "그럼 정말로 못 떠나시겠네요. 그러라고요.",
+                        "…낳을게요. 그러면 영영 제 거잖아요.",
+                    ],
+                    "casual": [
+                        "…응. 갖고 싶어.",
+                        "그러면 정말로 못 떠나잖아. 그러라고.",
+                        "…낳을게. 그러면 영영 내 거잖아.",
+                    ],
+                },
+            },
+
+            "decline": {
+                "expression": "huff",
+                "motion": None,
+                "affinity": 0,
+                "lines": {
+                    "polite": [
+                        "…그런 건 아직 말 안 할래요.",
+                        "지금은 그 이야기 하고 싶지 않아요.",
+                    ],
+                    "casual": [
+                        "…그런 건 아직 말 안 할래.",
+                        "지금은 그 얘기 하고 싶지 않아.",
+                    ],
+                },
+            },
+
+            "already": {
+                "expression": "fun",
+                "motion": None,
+                "affinity": 2,
+                "lines": {
+                    "polite": ["이미 말했잖아요.", "몇 번을 물어보세요."],
+                    "casual": ["이미 말했잖아.", "몇 번을 물어봐."],
+                },
+            },
+
+            # 아이가 선 뒤
+            "carrying": {
+                "expression": "peak_joy",
+                "motion": None,
+                "affinity": 4,
+                "lines": {
+                    "polite": ["…여기 있어요.", "이제 정말 못 가시겠네요."],
+                    "casual": ["…여기 있어.", "이제 정말 못 가겠네."],
+                },
+            },
+        },
+
         "devotion": {
             "per_point": 100,        # 실제 호감 100 = 순종 1
             "max": 50,
@@ -4064,6 +4295,16 @@ DIA = VirtualAvatar(
         },
     },
 
+    # 아이가 선 뒤 배가 불러 오는 정도.
+    #
+    # 몸에 그런 모프가 없어서 뼈로 만든다. spine 을 가로·앞뒤로 부풀리고
+    # 그 자식인 chest 를 같은 만큼 되돌린다 — 안 되돌리면 가슴과 어깨까지
+    # 같이 불어난다. 사이에 낀 배만 남는다.
+    pregnancy={
+        "spine_scale": [1.30, 1.02, 1.55],
+        "grow_ms": 2600,
+    },
+
     locomotion={
         "roam_radius": 1.15,        # 원점에서 벗어날 수 있는 최대 거리(m)
         "walk_speed": 0.42,         # m/s
@@ -4081,6 +4322,47 @@ DIA = VirtualAvatar(
         # 켜더라도 대화 중에는 움직이지 않고,
         # 한동안 조용해서 먼저 말을 건 뒤에야 발이 풀린다.
         "roam_enabled": False,
+
+        # ----------------------------------------------------
+        # 상대가 화면 안에 서 있을 때 (1인칭)
+        #
+        # 카메라가 곧 상대의 눈이다. 그래서 상대에게도 자리가 있고,
+        # 다이아는 그 자리를 보고 따라가고 비켜선다.
+        # 숫자를 화면에 박아 두지 않는 것은 다른 값들과 같은 이유다 —
+        # 개체가 자기 몸에 대한 것을 갖는다.
+        # ----------------------------------------------------
+
+        # 따라가기. 혼자 돌아다니기(roam_enabled)와 별개다.
+        # 대화 중에도 따라간다 — 말하다 말고 두고 가면 이상하다.
+        "follow_enabled": True,
+        "follow_far": 1.15,          # 이보다 멀어지면 발이 떨어진다(m)
+        "follow_near": 0.72,         # 이만큼 다가가면 멈춘다(m)
+        "follow_speed_mul": 1.6,     # 따라갈 때 걸음이 빨라지는 배수
+        "follow_min_affinity": -40,  # 사이가 이보다 나쁘면 안 따라간다
+
+        # 알아채는 거리. 이 안으로 들어오면 하던 걸 멈추고 돌아본다.
+        "notice_dist": 0.62,
+
+        # 서로 파고들지 않는 거리. 밀고 들어가면 상대가 밀려난다.
+        #
+        # 두 몸의 반지름을 더한 값(0.17+0.17=0.34)보다 조금 넉넉하게.
+        # 0.5 로 두었더니 얼굴을 맞댈 수가 없어 입맞춤이 아예 닿지
+        # 않았다 — 눈에서 머리까지가 늘 0.5m 를 넘었다.
+        "personal_space": 0.38,
+
+        # 손이 닿는 거리. 이보다 멀리서는 만질 수 없다 —
+        # 만지려면 다가가야 한다는 뜻이다.
+        #
+        # 상대 눈이 바닥에서 1.53m, 다이아 눈이 1.525m 로 거의 같다.
+        # 그래서 서서 마주 보면(0.72m) 머리·얼굴·가슴·허리까지 닿고,
+        # 다리와 발은 안 닿는다 — 앉아야(Shift) 손이 간다.
+        # 서서 발을 만지는 그림이 나오면 그게 더 이상하다.
+        "reach": 0.95,
+
+        # 상대가 걸어 다닐 수 있는 범위(원점에서, m).
+        # 화면의 바닥 원(6.6m)과 격자(가로 14m)가 이보다 넓어야 한다 —
+        # 발밑에서 바닥이 끝나면 허공에 선 꼴이 된다.
+        "room_radius": 6.0,
     },
 
     # --------------------------------------------------------
@@ -4265,6 +4547,84 @@ DIA = VirtualAvatar(
         #
         # 그 옷을 만져도 되는 사이여야 벗길 수 있다 —
         # 옷 자리(top/skirt)의 allow_from 을 그대로 쓴다.
+        # ----------------------------------------------------
+        # 몸을 섞는 것
+        #
+        # 손가락은 입과 보지에서만 다른 것이 된다(TouchTool.label_for).
+        # 그 자리에서 그 도구로 만지는 것은 '찌른다' 가 아니라
+        # 이것이고, 그래서 판정 이름도 따로 둔다.
+        #
+        # 하의를 벗겨야 한다. 옷을 입은 채로는 닿지 않는다.
+        # ----------------------------------------------------
+        "sex": {
+            "enabled": True,
+
+            "tool": "finger",
+            "zone": "pelvis",
+
+            # 이 옷이 벗겨져 있어야 한다
+            "needs_undressed": ["skirt"],
+
+            # 이만큼 이어야 절정에 이른다.
+            # 세는 값은 쓰다듬은 횟수라 한 번 끌 때마다 몇씩 오른다.
+            "climax_strokes": 8,
+
+            # 절정 한 번에 오르는 호감
+            "climax_affinity": 10,
+
+            # 절정을 이만큼 겪으면 아이가 선다.
+            # 다만 그러겠다고 말한 뒤여야 한다(relationship.child).
+            "to_pregnant": 5,
+
+            # 절정에 이르렀을 때. 얼굴은 절정 표정 중에서 고른다.
+            "climax": {
+                "lines": {
+                    "polite": ["…앗", "흐읏…", "…하아", "으…", "…읏"],
+                    "casual": ["…앗", "흐읏…", "…하아", "으…", "…읏"],
+                },
+            },
+        },
+
+        # ----------------------------------------------------
+        # 입맞춤
+        #
+        # 화면 안의 상대가 얼굴을 바짝 들이대면 눈을 감고 기다린다.
+        # 그 상태에서 입술로 입을 만져야 키스가 된다 — 그냥 다가가
+        # 누르는 것은 여전히 뽀뽀다.
+        #
+        # 기다리는 것과 실제로 닿는 것을 나눈 이유: 눈을 감는 것은
+        # 허락의 표시이고, 닿는 것은 상대가 하는 일이다. 한 동작으로
+        # 묶으면 다가가기만 해도 키스가 되어 버린다.
+        # ----------------------------------------------------
+        "kiss": {
+            "enabled": True,
+
+            # 눈에서 다이아 머리까지 이 거리 안으로 들어오면 기다린다(m).
+            #
+            # 바짝 붙으면(personal_space 0.38) 눈-머리 사이가 0.386m 다.
+            # 그래서 0.42 는 '정말로 코앞까지 갔을 때' 를 뜻한다.
+            "wait_dist": 0.42,
+
+            # 나가는 거리는 들어오는 거리보다 넓다.
+            # 같으면 문턱에 걸쳐 눈을 감았다 떴다 한다.
+            "leave_dist": 0.55,
+
+            # 얼굴이 시야 안에 있어야 한다(코사인). 뒷걸음질로 부딪힌
+            # 것까지 기다리는 것으로 치면 안 된다.
+            "wait_facing": 0.5,
+
+            # 이 사이부터 기다려 준다. 입술 도구가 입에 닿을 수 있는
+            # 조건(입 40 + 입술 90)과 같게 맞췄다.
+            "wait_from": 130,
+
+            # 기다리는 동안의 얼굴
+            "wait_expression": "eyes_closed",
+
+            # 이 도구로 이 자리를 만져야 키스다
+            "tool": "lips",
+            "zone": "mouth",
+        },
+
         "undress": {
             "enabled": True,
             # 벗길 수 있는 자리
@@ -4490,6 +4850,16 @@ DIA = VirtualAvatar(
 
                     "mouth": {
                         "label": "자지",
+
+                        # 고개는 움직이지 않는다.
+                        # 입에 닿아 있는데 끄덕이면 스스로 밀어내는 꼴이 된다.
+                        # 도구가 강제하는 nod 를 여기서만 지운다
+                        # (`"motion" in lines` 로 보므로 None 이 곧 '없음'이다).
+                        "motion": None,
+
+                        # 놀란 얼굴이 아니라 즐거운 얼굴.
+                        "expression": "fun",
+
                         "polite": ["으읍…", "…읏", "하아…", "으응…", "흐읍…"],
                         "casual": ["으읍…", "…읏", "하아…", "으응…", "흐읍…"],
                     },
@@ -4772,6 +5142,27 @@ DIA = VirtualAvatar(
                     "lines": {
                         "polite": ["하…", "그렇게 만지시면…", "…계속 하실 거예요?"],
                         "casual": ["하…", "그렇게 만지면…", "…계속 할 거야?"],
+                    },
+                },
+
+                # 눈을 감고 기다리는 중에 입술이 닿았을 때.
+                #
+                # 뽀뽀와 다른 것으로 친다. 뽀뽀는 이쪽에서 하는 것이고,
+                # 이것은 서로 기다렸다 하는 것이다. 그래서 놀라지 않는다.
+                # 몸짓도 없다 — 입을 맞추는 중에 쑥스러워하며 얼굴을
+                # 가리면 그 손이 사이를 가른다.
+                kiss={
+                    "expression": "eyes_closed",
+                    "expression_then": "fun",
+                    "motion": None,
+                    # 입술 도구가 2.5 배를 곱하므로 실제로는 12점 오른다.
+                    # 한 번 만지는 것 중에는 가장 크되, 고백(+30)보다는 작다.
+                    "affinity": 5,
+                    "lines": {
+                        "polite": ["…읏", "하아…", "…더요.", "숨… 못 쉬겠어요.",
+                                   "…이러면 안 놓아 드려요."],
+                        "casual": ["…읏", "하아…", "…더.", "숨… 못 쉬겠어.",
+                                   "…이러면 안 놓아줄 거야."],
                     },
                 },
                 deny={

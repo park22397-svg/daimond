@@ -1,7 +1,7 @@
 {
   "잠근_날": "2026-08-18",
   "왜": "사람이 눈으로 보고 하나하나 맞춘 값이다. 다시 계산하거나 어림잡아 바꾸면 안 된다.",
-  "표정_수": 30,
+  "표정_수": 31,
   "표정": {
     "sorrow": {
       "label": "슬픔",
@@ -208,6 +208,21 @@
       "auto_detect": null,
       "auto_weight": 0.8,
       "hold_ms": 2800,
+      "source": "base",
+      "is_reply_emotion": false
+    },
+    "drowsy": {
+      "label": "잠결",
+      "blendshapes": {},
+      "fallback_blendshapes": {},
+      "morphs": {
+        "Fcl_EYE_Close": 0.55,
+        "Fcl_BRW_Sorrow": 0.35,
+        "Fcl_MTH_A": 0.22
+      },
+      "auto_detect": null,
+      "auto_weight": 0.8,
+      "hold_ms": 2600,
       "source": "base",
       "is_reply_emotion": false
     },

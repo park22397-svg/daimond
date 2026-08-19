@@ -544,6 +544,52 @@ def process_chat(user_text):
         except Exception as e:
             print(f"[고백 처리 오류]: {e}")
 
+    # ----------------------------------------------------------
+    # 아이
+    #
+    # 고백과 같은 이유로 모델에게 맡기지 않는다. 아이를 갖겠다는 말은
+    # 그때그때 문장으로 정할 일이 아니라 사이가 정하는 것이고,
+    # 그 말 뒤로는 몸으로 하는 일의 뜻이 달라지기 때문이다.
+    #
+    # 순종의 마지막 칸(50)에 닿아야 받아들인다.
+    # ----------------------------------------------------------
+
+    if AVATAR.is_child_talk(user_text):
+        try:
+            _saved = load_relationship() or {}
+            _wants = bool(_saved.get("wants_child", False))
+            _preg = bool(_saved.get("pregnant", False))
+            _aff = _saved.get(
+                "affinity", AVATAR.relationship.get("start_affinity", 0))
+            _dev = AVATAR.devotion_level(_saved.get("devotion_raw", 0))
+
+            r = AVATAR.child_reply(stage, _dev, _wants, _preg)
+
+            if r["accepted"]:
+                _aff = AVATAR.clamp_affinity(
+                    _aff + r["affinity_delta"],
+                    lover=bool(_saved.get("lover", False)))
+                stage = AVATAR.next_stage(_aff, stage.key)
+                save_relationship(_aff, stage.key,
+                                  _saved.get("devotion_raw", 0),
+                                  _saved.get("lover", False),
+                                  wants_child=True)
+                affinity_now = _aff
+                print(f"[아이]: 그러겠다고 답했습니다. 순종 {_dev}.")
+            else:
+                print(f"[아이]: 순종 {_dev} — "
+                      f"{'이미 말했다' if _wants else '아직 이르다'}")
+
+            if r["reply"]:
+                return done(
+                    r["reply"],
+                    expression=r["expression"],
+                    motion=r.get("motion"),
+                )
+
+        except Exception as e:
+            print(f"[아이 처리 오류]: {e}")
+
     # 입을 닫은 단계에서는 모델을 부르지 않는다.
     #
     # 부르면 무슨 말이든 하게 되고, 그러면 '대답하지 않는다'가 아니라
