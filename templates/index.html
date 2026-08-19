@@ -4996,6 +4996,45 @@
         // 메인 애니메이션
         // ============================================================
 
+        // ------------------------------------------------------------
+        // 눈과 시선이 쓰는 상태
+        //
+        // 아래쪽 '눈·귀' 자리에 두면 늦다. animate() 가 여기서 한 번
+        // 불리는데 그 안에서 findFace()·updateGaze() 가 이걸 쓴다.
+        // const 는 끌어올려지지 않아서, 늦게 선언하면 첫 프레임에
+        // ReferenceError 가 나고 스크립트가 통째로 멈춘다.
+        // 그러면 파일 끝의 loadAvatar() 까지 못 가서 아바타가 안 나온다.
+        // ------------------------------------------------------------
+
+        // 눈이 쓰는 화면 조각들. 여기 두는 이유는 위와 같다 —
+        // findFace() 가 그리기 고리에서 불린다.
+        const eyeVideo = document.getElementById('eye-video');
+        const eyeCamBtn = document.getElementById('eye-cam');
+        const eyePhotoBtn = document.getElementById('eye-photo');
+        const eyeFile = document.getElementById('eye-file');
+
+        const eye = {
+            on: false,
+            stream: null,
+            timer: null,
+            busy: false,
+            seen: null,          // 지금 보이는 것
+            seenAt: 0,
+            spokeAt: 0,
+        };
+
+        const gaze = {
+            x: 0, y: 0,        // 화면 안 얼굴 자리 -1~1
+            has: false,
+            yaw: 0, pitch: 0,  // 지금 머리가 돌아간 정도(rad)
+            canvas: null,
+        };
+
+        const GAZE_MAX_YAW = 0.42;    // 고개를 좌우로 돌리는 한계(rad)
+        const GAZE_MAX_PITCH = 0.22;  // 위아래
+        const GAZE_FOLLOW = 2.6;      // 따라가는 속도
+
+
         function animate() {
 
             requestAnimationFrame(
@@ -5935,21 +5974,6 @@
         // 지난번 말한 지 충분히 지났고, 보이는 것이 실제로 달라졌을 때.
         // ============================================================
 
-        const eyeVideo = document.getElementById('eye-video');
-        const eyeCamBtn = document.getElementById('eye-cam');
-        const eyePhotoBtn = document.getElementById('eye-photo');
-        const eyeFile = document.getElementById('eye-file');
-
-        const eye = {
-            on: false,
-            stream: null,
-            timer: null,
-            busy: false,
-            seen: null,          // 지금 보이는 것
-            seenAt: 0,
-            spokeAt: 0,
-        };
-
         function visionCfg(key, fallback) {
             const v = (ENTITY && ENTITY.vision) ? ENTITY.vision[key] : undefined;
             return (v === undefined || v === null) ? fallback : v;
@@ -6333,17 +6357,6 @@
         // 않지만 '사람이 왼쪽에 있다' 정도는 충분히 알고, 무엇보다
         // 20초에 한 번이 아니라 매 순간 따라올 수 있다.
         // ============================================================
-
-        const gaze = {
-            x: 0, y: 0,        // 화면 안 얼굴 자리 -1~1
-            has: false,
-            yaw: 0, pitch: 0,  // 지금 머리가 돌아간 정도(rad)
-            canvas: null,
-        };
-
-        const GAZE_MAX_YAW = 0.42;    // 고개를 좌우로 돌리는 한계(rad)
-        const GAZE_MAX_PITCH = 0.22;  // 위아래
-        const GAZE_FOLLOW = 2.6;      // 따라가는 속도
 
         function findFace() {
             if (!eye.on || !eyeVideo.videoWidth) { gaze.has = false; return; }
