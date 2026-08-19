@@ -653,6 +653,7 @@
             <button id="eye-photo" title="사진 보여주기">🖼</button>
             <button id="eye-cam" title="카메라를 다이아 눈으로">📷</button>
             <button id="eye-mic" title="말로 걸기">🎤</button>
+            <button id="eye-view" title="1인칭 / 3인칭 (F)">👁</button>
             <video id="eye-video" autoplay playsinline muted></video>
         </div>
         <input type="file" id="eye-file" accept="image/*" style="display:none">
@@ -966,6 +967,32 @@
         function userForwardX() { return Math.sin(user.yaw); }
         function userForwardZ() { return Math.cos(user.yaw); }
 
+        // 3인칭인가. 카메라만 몸에서 떨어져 나간다 —
+        // 몸은 그대로 걸어 다니고, 다이아는 그 몸을 본다.
+        // 떨어져 나간 시선은 다이아가 모른다.
+        let thirdPerson = false;
+
+        // 상대의 눈이 있는 자리. 카메라가 아니라 **몸** 이 기준이다.
+        //
+        // 1인칭에서는 카메라와 같은 자리지만 3인칭에서는 다르다.
+        // 닿는 거리도 입맞춤도 이쪽으로 재야 한다.
+        const _eyeAt = new THREE.Vector3();
+
+        function userEye() {
+            return _eyeAt.set(user.x, user.eye + user.lift, user.z);
+        }
+
+        // 상대가 보고 있는 방향. 이것도 몸이 기준이다.
+        const _eyeFwd = new THREE.Vector3();
+
+        function userLook() {
+            return _eyeFwd.set(
+                Math.sin(user.yaw) * Math.cos(user.pitch),
+                Math.sin(user.pitch),
+                Math.cos(user.yaw) * Math.cos(user.pitch),
+            );
+        }
+
         // locomotion 에 적힌 거리를 꺼내 온다. 아직 개체를 못 받았으면
         // 화면이 들고 있는 값으로 버틴다.
         function followCfg(key, fallback) {
@@ -1035,9 +1062,16 @@
 
             user.eye = USER_SIT + (USER_EYE - USER_SIT) * (1 - user.sit);
 
-            // ---- 카메라가 곧 눈이다 ----
-            camera.position.set(user.x, user.eye + user.lift, user.z);
-            camera.rotation.set(user.pitch, user.yaw + Math.PI, 0);
+            // ---- 1인칭이면 카메라가 곧 눈이다 ----
+            //
+            // 3인칭에서는 카메라를 안 건드린다. 몸만 걸어 다니고
+            // 보는 자리는 따로 논다.
+            if (!thirdPerson) {
+                camera.position.set(user.x, user.eye + user.lift, user.z);
+                camera.rotation.set(user.pitch, user.yaw + Math.PI, 0);
+            } else {
+                followThirdCamera();
+            }
 
             // 투명한 몸도 같이 간다. 앉으면 낮아지고 뛰면 뜬다.
             const h = 1 - user.sit * 0.4;
@@ -1174,12 +1208,18 @@
             if (!head) return;
 
             head.getWorldPosition(_kissAt);
-            const dist = camera.position.distanceTo(_kissAt);
+
+            // 카메라가 아니라 몸에서 잰다.
+            //
+            // 3인칭에서 카메라를 얼굴 앞으로 돌리면 다이아가 눈을 감는
+            // 일이 생긴다 — 떨어져 나간 시선은 다이아가 모르는 것이므로
+            // 그 시선으로 다가간 것은 다가간 것이 아니다.
+            const eye = userEye();
+            const dist = eye.distanceTo(_kissAt);
 
             // 얼굴을 보고 있는가. 뒷걸음질로 부딪힌 것은 아니어야 한다.
-            _kissDir.copy(_kissAt).sub(camera.position).normalize();
-            camera.getWorldDirection(_kissFwd);
-            const facing = _kissDir.dot(_kissFwd);
+            _kissDir.copy(_kissAt).sub(eye).normalize();
+            const facing = _kissDir.dot(userLook());
 
             const aff = (typeof myAffinity === 'number') ? myAffinity : 0;
             const may = aff >= (k.wait_from || 0)
@@ -1249,36 +1289,96 @@
             console.log('[diamondAI] ' + (pregnant ? '아이가 섰다' : '되돌림'));
         }
 
-        function setFirstPerson(on) {
-            user.on = on;
-            controls.enabled = !on;
-            userNoticed = false;
+        // ------------------------------------------------------------
+        // 3인칭
+        //
+        // 카메라만 몸에서 떨어져 나간다. 몸은 그대로 있고 방향키로
+        // 걸어 다니며, 다이아는 여전히 그 몸을 보고 따라온다.
+        //
+        // **떨어져 나간 시선은 다이아가 모른다.** 그래서 닿는 거리도
+        // 입맞춤도 카메라가 아니라 몸을 기준으로 잰다. 뒤에서 얼굴을
+        // 들여다봐도 다가간 것이 아니다.
+        // ------------------------------------------------------------
 
-            if (on) {
-                camFree = false;
-            } else {
-                // 걷지 않는 시점에서 조이스틱이 떠 있으면 눌러 봐도
-                // 아무 일이 없어 고장으로 읽힌다. 같이 치운다.
-                releaseStick();
-                sitLatched = false;
-                document.getElementById('stick-sit').classList.remove('on');
+        const THIRD_BACK = 1.5;      // 뒤로 얼마나(m)
+        const THIRD_UP = 0.45;       // 위로 얼마나(m)
 
-                camera.rotation.set(0, 0, 0);
-                controls.target.set(0, LOOK_Y, 0);
-                camera.position.set(0, CAM_Y, 1.65);
+        const _thirdLast = new THREE.Vector3();
+
+        function setThirdPerson(on) {
+            if (thirdPerson === !!on) return;
+            thirdPerson = !!on;
+
+            document.getElementById('eye-view')
+                .classList.toggle('on', thirdPerson);
+
+            // 궤도 시점은 3인칭에서만 쓴다
+            controls.enabled = thirdPerson;
+
+            // 몸이 보여야 어디에 서 있는지 안다.
+            // 판정구를 켜 둔 상태면 그대로 둔다.
+            userBody.material = (thirdPerson || showHitboxes)
+                ? USER_SHOWN : USER_HIDDEN;
+
+            if (thirdPerson) {
+                // 상대의 어깨 너머 뒤쪽에 선다
+                const f = { x: userForwardX(), z: userForwardZ() };
+
+                controls.target.set(user.x, user.eye + user.lift, user.z);
+                camera.position.set(
+                    user.x - f.x * THIRD_BACK,
+                    user.eye + user.lift + THIRD_UP,
+                    user.z - f.z * THIRD_BACK,
+                );
                 controls.update();
+
+                _thirdLast.set(user.x, user.eye + user.lift, user.z);
+
+                showHint('3인칭 — 끌어서 돌리고, 방향키로 몸을 움직인다. '
+                       + '다이아는 이 시선을 모른다', 4600);
+            } else {
+                camera.rotation.order = 'YXZ';
+                showHint('1인칭 — 카메라가 다시 네 눈이다', 3200);
+            }
+        }
+
+        // 3인칭에서 몸이 걸어간 만큼 시점도 같이 옮긴다.
+        //
+        // 카메라와 바라보는 곳을 **같은 만큼** 옮긴다. 그래야 사람이
+        // 돌려 놓은 각도가 그대로 남는다. 매번 뒤로 되돌리면
+        // 돌려 볼 수가 없다.
+        function followThirdCamera() {
+            const nx = user.x, ny = user.eye + user.lift, nz = user.z;
+
+            const dx = nx - _thirdLast.x;
+            const dy = ny - _thirdLast.y;
+            const dz = nz - _thirdLast.z;
+
+            if (dx || dy || dz) {
+                camera.position.x += dx;
+                camera.position.y += dy;
+                camera.position.z += dz;
+
+                controls.target.x += dx;
+                controls.target.y += dy;
+                controls.target.z += dz;
+
+                _thirdLast.set(nx, ny, nz);
             }
 
-            stickPad.style.display = on ? '' : 'none';
-            stickKeys.style.display = on ? '' : 'none';
-
-            showHint(on ? '1인칭 — 조이스틱 · 방향키 · Shift 앉기 · 스페이스 점프'
-                        : '둘러보기 시점 (F 로 되돌림)');
+            controls.update();
         }
 
 
         function resetCamera() {
             camFree = false;
+
+            // 3인칭이면 시점을 어깨 뒤로 되돌린다
+            if (thirdPerson) {
+                thirdPerson = false;
+                setThirdPerson(true);
+                return;
+            }
 
             if (user.on) {
                 user.x = 0; user.z = 1.65;
@@ -3491,7 +3591,9 @@
 
             // 상대의 몸도 같이 드러낸다. 평소에는 투명이라
             // 어디에 서 있는지 눈으로 볼 방법이 이것뿐이다.
-            userBody.material = showHitboxes ? USER_SHOWN : USER_HIDDEN;
+            // 3인칭에서는 이미 보이고 있으므로 끄지 않는다.
+            userBody.material = (showHitboxes || thirdPerson)
+                ? USER_SHOWN : USER_HIDDEN;
         }
 
         function pickBone(event) {
@@ -3526,7 +3628,13 @@
 
             // 손이 닿는 거리 밖이면 못 만진다.
             // 방 건너편에서 쓰다듬을 수는 없다 — 만지려면 다가가야 한다.
-            if (user.on && hit.distance > followCfg('reach', 0.95)) return null;
+            //
+            // 재는 자리는 카메라가 아니라 **몸** 이다. 3인칭에서는
+            // 카메라가 멀리 떨어져 있어서, 카메라로 재면 바로 앞에
+            // 서 있어도 손이 안 닿는다.
+            if (user.on
+                && userEye().distanceTo(hit.point)
+                   > followCfg('reach', 0.95)) return null;
 
             const node = hit.object.parent;
             const local = node.worldToLocal(hit.point.clone());
@@ -3890,10 +3998,10 @@
             // 아바타를 눌렀으면 만지는 것이고, 빈 곳이면 시점을 돌리는 것이다.
             // 둘 다 왼쪽 끌기라 여기서 갈라 줘야 서로 방해하지 않는다.
             // 1인칭에서는 궤도 시점을 아예 안 쓴다 — 대신 고개를 돌린다.
-            controls.enabled = !hit && !user.on;
+            controls.enabled = !hit && thirdPerson;
 
             if (!hit) {
-                if (user.on) {
+                if (!thirdPerson) {
                     look.on = true;
                     look.x = e.clientX;
                     look.y = e.clientY;
@@ -4002,7 +4110,7 @@
 
             // 다음 번에 빈 곳을 끌면 시점이 돌아야 한다.
             // 1인칭에서는 궤도 시점을 계속 꺼 둔다.
-            controls.enabled = !user.on;
+            controls.enabled = thirdPerson;
 
             if (!touchState.down) return;
 
@@ -4073,7 +4181,7 @@
             }
 
             if (e.key === 'f' || e.key === 'F') {
-                setFirstPerson(!user.on);
+                setThirdPerson(!thirdPerson);
             }
         });
 
@@ -6159,6 +6267,9 @@
         }
 
         micBtn.addEventListener('click', () => ear.on ? stopEar() : startEar());
+
+        document.getElementById('eye-view').addEventListener(
+            'click', () => setThirdPerson(!thirdPerson));
 
 
         // ============================================================
