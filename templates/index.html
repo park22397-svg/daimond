@@ -27,6 +27,41 @@
             overflow: hidden;
         }
 
+        /* 방 겹치기 — 카메라에 비친 곳을 다이아 뒤에 깐다.
+           캔버스는 alpha 라 이 영상이 그대로 비쳐 보인다.
+           거울처럼 뒤집는다. 안 뒤집으면 내가 오른쪽으로 갈 때
+           배경 속 나는 왼쪽으로 가서 방향을 종잡을 수 없다. */
+        #room-video {
+            display: none;
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+            transform: scaleX(-1);
+        }
+        #room-video.on { display: block; }
+
+        /* 사람을 지운 배경. 영상 대신 이것을 깐다. */
+        #room-plate {
+            display: none;
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+            /* 거울처럼 뒤집는다.
+               안 뒤집으면 내가 오른쪽으로 갈 때 배경 속 나는 왼쪽으로
+               가서, 어느 쪽이 어느 쪽인지 알 수 없다. */
+            transform: scaleX(-1);
+        }
+        #room-plate.on { display: block; }
+
+        /* 방을 깔면 캔버스가 그 위에 와야 한다 */
+        #avatar-container.room #canvas3d { position: relative; z-index: 1; }
+
         #avatar-container {
             flex: 1;
             position: relative;
@@ -56,12 +91,18 @@
         }
 
         /* 가위바위보 */
+        /* 가위바위보.
+           손 단추를 아래로 펼치면 눈 단추(96px)를 덮는다.
+           옆으로 펼치면 아래에 무엇이 오든 겹치지 않는다. */
         #rps-bar {
             position: absolute;
             left: 14px;
             top: 52px;
             z-index: 12;
             user-select: none;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
         }
 
         #rps-open {
@@ -248,7 +289,6 @@
         #rps-hands {
             display: none;
             gap: 6px;
-            margin-top: 7px;
         }
 
         #rps-hands.open { display: flex; }
@@ -595,6 +635,82 @@
             color: #dfe6e9;
         }
 
+        /* ----------------------------------------------------------
+           상황
+
+           괄호로 상황을 쓸 수 있는데 매번 생각해 내야 하는 것이 일이라,
+           지금 흐름에 맞는 것을 몇 개 지어 준다.
+           짓는 것은 모델이고 **고르는 것은 사람이다.**
+           ---------------------------------------------------------- */
+        #situation-bar {
+            padding: 10px 15px 0;
+            background: #1a1a26;
+        }
+
+        #situation-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 8px;
+            min-height: 4px;
+        }
+
+        #situation-chips button {
+            background: rgba(108, 92, 231, 0.16);
+            border: 1px solid #3d3560;
+            color: #cfc7f0;
+            border-radius: 999px;
+            padding: 5px 11px;
+            font-size: 0.78rem;
+            font-family: inherit;
+            cursor: pointer;
+            text-align: left;
+        }
+
+        #situation-chips button:hover {
+            background: rgba(108, 92, 231, 0.34);
+            border-color: #6c5ce7;
+        }
+
+        #situation-chips .waiting {
+            color: #6a6a86;
+            font-size: 0.76rem;
+            padding: 5px 2px;
+        }
+
+        #situation-row {
+            display: flex;
+            gap: 6px;
+        }
+
+        #situation-input {
+            flex: 1;
+            padding: 9px 11px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            background: #14141f;
+            color: #cfc7f0;
+            outline: none;
+            font-size: 0.85rem;
+            font-family: inherit;
+        }
+
+        #situation-input::placeholder { color: #565672; }
+
+        #situation-row button {
+            padding: 9px 12px;
+            border-radius: 8px;
+            border: 1px solid #3d3560;
+            background: rgba(108, 92, 231, 0.16);
+            color: #cfc7f0;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+
+        #situation-row button:hover { background: rgba(108, 92, 231, 0.34); }
+        #situation-row button:disabled { opacity: 0.45; cursor: default; }
+
         #chat-input-area {
             padding: 15px;
             background: #1a1a26;
@@ -632,6 +748,8 @@
 <body>
 
     <div id="avatar-container">
+        <video id="room-video" autoplay muted playsinline></video>
+        <canvas id="room-plate"></canvas>
 
         <div id="speech-bubble">...</div>
 
@@ -654,6 +772,7 @@
             <button id="eye-cam" title="카메라를 다이아 눈으로">📷</button>
             <button id="eye-mic" title="말로 걸기">🎤</button>
             <button id="eye-view" title="1인칭 / 3인칭 (F)">👁</button>
+            <button id="eye-room" title="카메라에 보이는 사람을 상대로 (배경도 카메라로)">🧍</button>
             <video id="eye-video" autoplay playsinline muted></video>
         </div>
         <input type="file" id="eye-file" accept="image/*" style="display:none">
@@ -711,6 +830,20 @@
 
         <div id="chat-messages"></div>
 
+        <!-- 상황 — AI 가 지어 준 보기. 눌러서 고른다 -->
+        <div id="situation-bar">
+            <div id="situation-chips"></div>
+            <div id="situation-row">
+                <input
+                    type="text"
+                    id="situation-input"
+                    placeholder="상황을 직접 쓰기 — 예: 다이아의 손을 잡는다"
+                >
+                <button id="situation-send" title="상황과 말을 함께 보내기">( )</button>
+                <button id="situation-new" title="보기 다시 짓기">↻</button>
+            </div>
+        </div>
+
         <div id="chat-input-area">
 
             <input
@@ -734,6 +867,7 @@
         // ============================================================
 
         const canvas = document.getElementById('canvas3d');
+        const avatarContainer = document.getElementById('avatar-container');
 
         const scene = new THREE.Scene();
 
@@ -789,6 +923,15 @@
         const rimLight = new THREE.DirectionalLight(0xa8b6ff, 0.55);
         rimLight.position.set(-0.9, 0.5, -1.0).normalize();
         scene.add(rimLight);
+
+        // 옆에서 비스듬히 — 굴곡을 드러내는 빛.
+        //
+        // 정면에서만 비추면 배나 가슴골처럼 완만한 곡면은 빛을
+        // 고르게 받아 평평해 보인다. 옆에서 얕게 넣으면 나온 데와
+        // 들어간 데의 밝기가 갈린다.
+        const shapeLight = new THREE.DirectionalLight(0xffe9d6, 0.45);
+        shapeLight.position.set(-1.0, 0.15, 0.55).normalize();
+        scene.add(shapeLight);
 
         // 아래에서 아주 약하게 받쳐 얼굴이 새까매지지 않게
         const fillLight = new THREE.DirectionalLight(0xffffff, 0.18);
@@ -856,7 +999,7 @@
             shadow.renderOrder = -1;
             scene.add(shadow);
 
-            return shadow;
+            return { shadow: shadow, floor: floor };
         }
 
         // 바닥 — 이게 없으면 걸어도 제자리처럼 보인다.
@@ -869,7 +1012,17 @@
         floorGrid.position.y = -0.2;
         scene.add(floorGrid);
 
-        const footShadow = buildFloor(-0.2);
+        const floorParts = buildFloor(-0.2);
+        const footShadow = floorParts.shadow;
+
+        // 방을 겹칠 때는 우리가 그린 바닥을 걷는다.
+        // 카메라에 이미 진짜 바닥이 있는데 그 위에 원판을 얹으면
+        // 바닥이 두 겹으로 보인다. 발밑 그림자만 남긴다 —
+        // 그건 다이아가 그 바닥에 닿아 있다는 표시라서 오히려 있어야 한다.
+        function setFloorVisible(on) {
+            floorParts.floor.visible = on;
+            floorGrid.visible = on;
+        }
 
 
         // ============================================================
@@ -1093,6 +1246,46 @@
         }
 
 
+        // 불렀는가. 부르면 손이 닿는 데까지 온다.
+        //
+        // 평소 서는 거리(1.35)는 이야기하기 좋지만 손이 안 닿는다.
+        // 그렇다고 늘 붙어 있으면 답답하다. 그래서 부를 때만 온다.
+        let comeClose = false;
+
+        function nearNow() {
+            return comeClose
+                ? followCfg('come_near', 0.72)
+                : followCfg('follow_near', 1.35);
+        }
+
+        function farNow() {
+            // 가까이 있는 동안에는 조금만 멀어져도 다시 붙는다.
+            // 평소 거리(1.80)를 그대로 쓰면 불러 놓고 한 발 물러서면
+            // 그대로 서 있게 된다.
+            return comeClose
+                ? nearNow() + 0.45
+                : followCfg('follow_far', 1.80);
+        }
+
+        function setApproach(how) {
+            const want = (how === 'near');
+            if (comeClose === want) return;
+
+            comeClose = want;
+
+            // 곧바로 발을 뗀다. 다음에 멀어질 때까지 기다리지 않는다.
+            if (!isSleeping) {
+                roam.following = true;
+                roam.state = 'move';
+                trackUser();
+                playMotion('walk');
+            }
+
+            console.log('[diamondAI] ' + (want ? '가까이 온다' : '물러난다')
+                + ' -> ' + nearNow().toFixed(2) + 'm');
+        }
+
+
         // 멀어졌으면 따라간다.
         function startFollow() {
             if (!user.on || isSleeping || kissWaiting) return false;
@@ -1103,9 +1296,9 @@
 
             const dx = user.x - roam.x, dz = user.z - roam.z;
             const dist = Math.hypot(dx, dz);
-            if (dist <= followCfg('follow_far', 1.15)) return false;
+            if (dist <= farNow()) return false;
 
-            const keep = followCfg('follow_near', 0.72);
+            const keep = nearNow();
             roam.targetX = user.x - dx / dist * keep;
             roam.targetZ = user.z - dz / dist * keep;
             roam.following = true;
@@ -1119,7 +1312,7 @@
         function trackUser() {
             const dx = user.x - roam.x, dz = user.z - roam.z;
             const dist = Math.hypot(dx, dz);
-            const keep = followCfg('follow_near', 0.72);
+            const keep = nearNow();
 
             if (dist <= keep) {
                 roam.following = false;
@@ -1271,22 +1464,293 @@
         // 옷만 부르고 몸이 그대로면 배가 옷을 뚫는다.
         // ------------------------------------------------------------
 
-        // 아이가 섰는가.
+        // ------------------------------------------------------------
+        // 배
         //
-        // 배는 만들지 않는다. spine 을 부풀리고 chest 를 역수로 되돌리는
-        // 방식으로 해 봤는데 화면에서 티가 나지 않았다 — 스키닝이
-        // 그 배율을 제대로 받지 않는다. 모프 없이 뼈만으로 배를
-        // 만들려던 것이 무리였다.
+        // 뼈로는 안 된다. 배 높이의 살은 hips 51% · chest 19% · spine 19%
+        // 로 나뉘는데, spine 을 부풀리고 chest 를 역수로 되돌리면
+        // 서로 지워진다(처음에 그렇게 했다가 아무것도 안 나왔다).
         //
-        // 그래서 몸은 그대로 두고 **자각만** 남긴다. 아이가 섰다는 것을
-        // 다이아가 알고 있고, 그게 말에 묻어난다(프롬프트의 [아이]).
-        // 눈에 보이는 것보다 그쪽이 이 프로그램에서 더 큰 몫이다.
-        let pregnant = false;
+        // 그래서 정점을 직접 민다. Body 메시의 프리미티브 여섯이
+        // **정점 배열 하나를 함께 쓰므로** 한 번 밀면 몸과 옷이 같이
+        // 나온다. 스키닝은 그 위에 얹히니 걷거나 숙여도 배는 따라간다.
+        //
+        // 자각(프롬프트의 [아이])은 이것과 별개로 그대로 있다.
+        // ------------------------------------------------------------
 
-        function setPregnant(on) {
+        let pregnant = false;
+        let bellyNow = 0;            // 지금 부른 정도 0~1
+        let bellyWant = 0;
+        let bellyOverride = null;    // 시험 창이 밀고 있는 값
+
+        // 손댄 정점 배열들. 원본을 떠 두고 그 위에 얹는다.
+        const bellyMeshes = [];      // {attr, base, sphere}
+
+        function pregCfg() {
+            return (ENTITY && ENTITY.pregnancy) || null;
+        }
+
+        function setPregnant(on, instant) {
             if (pregnant === !!on) return;
             pregnant = !!on;
+            bellyWant = pregnant ? 1 : 0;
+            if (instant) bellyNow = bellyWant;
             console.log('[diamondAI] ' + (pregnant ? '아이가 섰다' : '되돌림'));
+        }
+
+        // 어떤 정점 배열을 밀지 찾아 둔다.
+        //
+        // 프리미티브가 배열을 함께 쓰므로 같은 것을 두 번 담지 않는다.
+        // 두 번 담으면 두 배로 밀린다.
+        function collectBelly(root) {
+            if (!root) return;
+
+            root.traverse(o => {
+                if (!o.isMesh && !o.isSkinnedMesh) return;
+                if (o.userData && o.userData.bone) return;      // 판정구
+                if (o.userData && o.userData.part === 'hair') return;
+
+                const g = o.geometry;
+                const a = g && g.attributes && g.attributes.position;
+                if (!a) return;
+
+                if (bellyMeshes.some(m => m.attr === a)) return;
+
+                // 배 높이에 정점이 있는 것만. 얼굴이나 머리카락은 뺀다.
+                const p = pregCfg() || {};
+                const cy = p.center_y || 1.02;
+                const ry = p.radius_y || 0.17;
+
+                let has = false;
+                for (let i = 1; i < a.array.length; i += 3) {
+                    if (Math.abs(a.array[i] - cy) < ry) { has = true; break; }
+                }
+                if (!has) return;
+
+                bellyMeshes.push({
+                    attr: a,
+                    base: Float32Array.from(a.array),
+                    geo: g,
+                    // 이 정점 배열을 함께 쓰는 것들. 법선을 한 번에
+                    // 계산해야 해서 모아 둔다.
+                    geos: [g],
+                    normal: g.attributes.normal || null,
+                    normalBase: g.attributes.normal
+                        ? Float32Array.from(g.attributes.normal.array) : null,
+                });
+            });
+
+            // 같은 정점 배열을 쓰는 다른 조각들을 찾아 붙인다
+            root.traverse(o => {
+                if (!o.isMesh && !o.isSkinnedMesh) return;
+                const g = o.geometry;
+                const a = g && g.attributes && g.attributes.position;
+                if (!a) return;
+
+                const m = bellyMeshes.find(v => v.attr === a);
+                if (m && m.geos.indexOf(g) < 0) m.geos.push(g);
+            });
+
+            console.log('[diamondAI] 배를 밀 정점 배열 '
+                + bellyMeshes.length + '개');
+        }
+
+        // 가슴골을 판다.
+        //
+        // 골은 이미 있다. 다만 얕다 — 실측하니 가운데가 옆보다 겨우
+        // 1.7cm 안쪽이고, 그 정도는 MToon 의 명암 한 칸 안에 통째로
+        // 묻혀서 앞에서 보면 없는 것과 같다.
+        //
+        // 임신과 달리 이건 늘 그대로다. 그래서 원본(base) 자체를 고쳐
+        // 새 기준으로 삼는다 — 그 위에 배가 얹히고, 배를 되돌려도
+        // 골은 남는다.
+        //
+        // 옷도 같은 정점 배열을 쓰므로 같이 파인다. 그래야 옷 위로도
+        // 골이 비친다.
+        function digCleavage() {
+            const c = (ENTITY && ENTITY.cleavage) || null;
+            if (!c || !c.enabled || !bellyMeshes.length) return;
+
+            const cy = c.center_y || 1.27;
+            const ry = c.radius_y || 0.075;
+            const rx = c.radius_x || 0.034;
+            const dp = c.depth || 0.016;
+
+            let moved = 0;
+
+            for (let m = 0; m < bellyMeshes.length; m++) {
+                const rec = bellyMeshes[m];
+                const base = rec.base;
+                const arr = rec.attr.array;
+
+                for (let i = 0; i < base.length; i += 3) {
+                    const x = base[i], y = base[i + 1], z = base[i + 2];
+
+                    // 앞면만. 등은 팔 이유가 없다.
+                    if (z >= 0) continue;
+
+                    const dy = Math.abs(y - cy);
+                    const dx = Math.abs(x);
+                    if (dy >= ry || dx >= rx) continue;
+
+                    const fy = Math.cos((dy / ry) * Math.PI * 0.5);
+                    const fx = Math.cos((dx / rx) * Math.PI * 0.5);
+
+                    // 몸 안쪽으로 판다 (+z 가 안쪽이다)
+                    base[i + 2] = z + dp * fy * fy * fx * fx;
+                    arr[i + 2] = base[i + 2];
+                    moved++;
+                }
+
+                rec.attr.needsUpdate = true;
+            }
+
+            console.log('[diamondAI] 가슴골 — 정점 ' + moved + '개를 팠다');
+        }
+
+
+        function applyBelly(k) {
+            const p = bellyOverride || pregCfg();
+            if (!p || !bellyMeshes.length) return;
+
+            const cy = p.center_y || 1.09;
+            const ry = p.radius_y || 0.09;
+            const edge = (p.edge === undefined) ? 0.5 : p.edge;
+            const fade = p.fade_y || 0.08;
+
+            const fw = (p.forward || 0.055) * k;
+            const sd = (p.side || 0.022) * k;
+            const bk = (p.back || 0.008) * k;
+
+            const outer = ry + fade;
+
+            for (let m = 0; m < bellyMeshes.length; m++) {
+                const arr = bellyMeshes[m].attr.array;
+                const base = bellyMeshes[m].base;
+
+                for (let i = 0; i < base.length; i += 3) {
+                    const x = base[i], y = base[i + 1], z = base[i + 2];
+
+                    const d = Math.abs(y - cy);
+
+                    if (d >= outer) {
+                        arr[i] = x; arr[i + 1] = y; arr[i + 2] = z;
+                        continue;
+                    }
+
+                    // 곡선을 두 단으로 준다.
+                    //
+                    // 한 단으로 0 까지 떨어뜨리면 옆에서 봤을 때 배가
+                    // 뾰족하다. 배 끝에서도 가운데의 edge 배(기본 0.5)는
+                    // 나와 있고, 거기서 fade 만큼 더 가서 0 이 된다.
+                    let w;
+                    if (d <= ry) {
+                        // 가운데 1 -> 배 끝 edge
+                        const c = Math.cos((d / ry) * Math.PI * 0.5);
+                        w = edge + (1 - edge) * c * c;
+                    } else {
+                        // 배 끝 edge -> 0
+                        const c = Math.cos(((d - ry) / fade) * Math.PI * 0.5);
+                        w = edge * c * c;
+                    }
+
+                    // 앞쪽이 많이 나오고 뒤는 조금만.
+                    // 앞뒤를 같이 밀면 통이 굵어질 뿐 배가 아니다.
+                    const front = z < 0;
+
+                    arr[i] = x + (x >= 0 ? sd : -sd) * w;
+                    arr[i + 1] = y;
+                    arr[i + 2] = z + (front ? -fw * w : bk * w);
+                }
+
+                bellyMeshes[m].attr.needsUpdate = true;
+            }
+
+            faceBellyNormals();
+        }
+
+
+        // 밀어 놓은 모양대로 법선을 다시 잡는다.
+        //
+        // 이게 없으면 배는 실제로 나왔는데 빛이 옛 모양대로 맞아서
+        // 앞에서 보면 평평해 보인다. 모양이 아니라 명암이 없는 것이다.
+        //
+        // 프리미티브 여섯이 정점 배열을 함께 쓰므로, 한 조각씩
+        // computeVertexNormals() 를 부르면 서로 지운다.
+        // 0 으로 지우는 것은 한 번만 하고, 삼각형은 모두에서 모은다.
+        function faceBellyNormals() {
+            for (let m = 0; m < bellyMeshes.length; m++) {
+                const rec = bellyMeshes[m];
+                if (!rec.normal) continue;
+
+                const pos = rec.attr.array;
+                const nrm = rec.normal.array;
+
+                nrm.fill(0);
+
+                for (let gi = 0; gi < rec.geos.length; gi++) {
+                    const idx = rec.geos[gi].index;
+                    if (!idx) continue;
+                    const ix = idx.array;
+
+                    for (let t = 0; t < ix.length; t += 3) {
+                        const a = ix[t] * 3, b = ix[t + 1] * 3, c = ix[t + 2] * 3;
+
+                        const ax = pos[b] - pos[a];
+                        const ay = pos[b + 1] - pos[a + 1];
+                        const az = pos[b + 2] - pos[a + 2];
+                        const bx = pos[c] - pos[a];
+                        const by = pos[c + 1] - pos[a + 1];
+                        const bz = pos[c + 2] - pos[a + 2];
+
+                        const nx = ay * bz - az * by;
+                        const ny = az * bx - ax * bz;
+                        const nz = ax * by - ay * bx;
+
+                        nrm[a] += nx; nrm[a + 1] += ny; nrm[a + 2] += nz;
+                        nrm[b] += nx; nrm[b + 1] += ny; nrm[b + 2] += nz;
+                        nrm[c] += nx; nrm[c + 1] += ny; nrm[c + 2] += nz;
+                    }
+                }
+
+                for (let i = 0; i < nrm.length; i += 3) {
+                    const l = Math.hypot(nrm[i], nrm[i + 1], nrm[i + 2]);
+                    if (l > 1e-9) {
+                        nrm[i] /= l; nrm[i + 1] /= l; nrm[i + 2] /= l;
+                    } else if (rec.normalBase) {
+                        // 삼각형이 하나도 안 닿은 정점은 원래 것을 둔다
+                        nrm[i] = rec.normalBase[i];
+                        nrm[i + 1] = rec.normalBase[i + 1];
+                        nrm[i + 2] = rec.normalBase[i + 2];
+                    }
+                }
+
+                rec.normal.needsUpdate = true;
+            }
+        }
+
+        function updateBelly(dt) {
+            if (!bellyOverride && bellyNow === bellyWant && bellyNow === 0) {
+                return;
+            }
+
+            if (bellyNow !== bellyWant) {
+                const p = pregCfg();
+                const ms = (p && p.grow_ms) || 2600;
+                const step = (dt * 1000) / Math.max(200, ms);
+                bellyNow += Math.sign(bellyWant - bellyNow)
+                    * Math.min(step, Math.abs(bellyWant - bellyNow));
+
+                // 다 자란 뒤에는 테두리를 한 번만 다시 잡는다.
+                // 매 프레임 다시 잡으면 정점 수만큼 헛돈다.
+                if (bellyNow === bellyWant) {
+                    bellyMeshes.forEach(m => {
+                        try { m.geo.computeBoundingSphere(); } catch (e) {}
+                    });
+                }
+            }
+
+            applyBelly(bellyNow);
         }
 
         // ------------------------------------------------------------
@@ -1606,6 +2070,25 @@
                 }).then(() => {
                     cacheBones();
                     splitParts();
+
+                    // 배를 밀 정점 배열을 찾아 둔다.
+                    // splitParts() 뒤라야 머리카락을 가려낼 수 있고,
+                    // 표현용 몸(bodyVRM)까지 다 온 뒤라야 둘 다 잡는다.
+                    collectBelly(currentVRM && currentVRM.scene);
+                    collectBelly(bodyVRM && bodyVRM.scene);
+
+                    // 골을 먼저 판다. 이게 새 원본이 되고 배가 그 위에 얹힌다.
+                    digCleavage();
+
+                    if (pregnant) applyBelly(1);
+
+                    // 밀어 놓은 모양대로 빛이 맞아야 보인다
+                    faceBellyNormals();
+
+                    // 굴곡이 보이게 명암을 손본다
+                    tuneShading(currentVRM && currentVRM.scene);
+                    tuneShading(bodyVRM && bodyVRM.scene);
+
                     buildMorphs();
                     buildHitboxes();
                     setTool(null);
@@ -2741,7 +3224,7 @@
                     // 이때는 부풀어 오르는 시늉 없이 곧바로 그 모습이다 —
                     // 열 때마다 다시 배는 것처럼 보이면 안 된다.
                     if (typeof d.pregnant === 'boolean') {
-                        setPregnant(d.pregnant);
+                        setPregnant(d.pregnant, true);
                     }
 
                     if (typeof d.mood === 'number') {
@@ -3328,6 +3811,49 @@
                     + (r.above * 100).toFixed(0) + 'cm 위)');
             });
         }
+
+        // ------------------------------------------------------------
+        // 명암
+        //
+        // MToon 은 빛을 몇 칸으로 뭉쳐서 칠한다(toon). 그래서 배나
+        // 가슴골처럼 완만한 굴곡은 한 칸 안에 들어가 아예 안 보인다.
+        //
+        // 칸 사이를 부드럽게 풀고(shadeToony), 그늘이 시작되는 자리를
+        // 조금 올리고(shadeShift), 윤곽을 따라 도는 빛을 살짝 준다
+        // (rim). 셋 다 얼굴 인상을 바꾸므로 조금씩만 건드린다.
+        //
+        // 숫자는 개체가 갖는다 — 눈으로 보고 맞추는 값이라서.
+        // ------------------------------------------------------------
+
+        function tuneShading(root) {
+            const s = (ENTITY && ENTITY.model && ENTITY.model.shading) || null;
+            if (!s || !root) return;
+
+            let count = 0;
+
+            root.traverse(o => {
+                if (!o.isMesh && !o.isSkinnedMesh) return;
+                if (o.userData && o.userData.bone) return;
+
+                const mats = Array.isArray(o.material) ? o.material : [o.material];
+
+                mats.forEach(mt => {
+                    if (!mt || mt.shadeToony === undefined) return;   // MToon 만
+
+                    if (s.shade_toony !== undefined) mt.shadeToony = s.shade_toony;
+                    if (s.shade_shift !== undefined) mt.shadeShift = s.shade_shift;
+                    if (s.rim_mix !== undefined) mt.rimLightingMix = s.rim_mix;
+                    if (s.rim_power !== undefined) mt.rimFresnelPower = s.rim_power;
+                    if (s.rim_lift !== undefined) mt.rimLift = s.rim_lift;
+
+                    mt.needsUpdate = true;
+                    count++;
+                });
+            });
+
+            console.log('[diamondAI] 명암을 손본 재질 ' + count + '개');
+        }
+
 
         function splitParts() {
             Object.keys(PARTS).forEach(k => PARTS[k] = []);
@@ -3925,7 +4451,7 @@
 
             // 아이가 섰으면 배가 불러 온다
             if (typeof data.pregnant === 'boolean') {
-                setPregnant(data.pregnant);
+                setPregnant(data.pregnant, false);
             }
 
             if (data.pregnant_now) {
@@ -4155,8 +4681,21 @@
         // 한다. 그래서 눌린 키를 `held` 에 적어 두고 그리기 고리가 읽는다.
         // ------------------------------------------------------------
 
+        // 글을 쓰고 있는 중인가.
+        //
+        // 대화칸만 빼고 있었더니 상황칸에 글을 쓸 때 스페이스바로 뛰고
+        // Shift 로 앉았다. 칸이 늘어날 때마다 여기에 하나씩 적는 대신,
+        // 지금 초점이 어디에 있는지로 판단한다.
+        function isTyping() {
+            const el = document.activeElement;
+            if (!el) return false;
+            const tag = (el.tagName || '').toLowerCase();
+            return tag === 'input' || tag === 'textarea' || el.isContentEditable;
+        }
+
+
         window.addEventListener('keydown', (e) => {
-            if (document.activeElement === chatInput) return;
+            if (isTyping()) return;
             if (!e.key) return;
 
             if (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
@@ -4187,6 +4726,8 @@
 
         window.addEventListener('keyup', (e) => {
             if (!e.key) return;
+            // 뗀 것은 글을 쓰는 중이라도 풀어 준다.
+            // 누르고 있다가 칸을 눌러 초점을 옮기면 키가 눌린 채로 남는다.
             if (e.key === 'Shift') { held.Shift = false; return; }
             if (e.key.indexOf('Arrow') === 0) held[e.key] = false;
         });
@@ -4199,7 +4740,7 @@
 
         // 판정구를 눈으로 확인하고 싶을 때
         window.addEventListener('keydown', (e) => {
-            if (document.activeElement === chatInput) return;
+            if (isTyping()) return;
 
             if (e.key === 'h' || e.key === 'H') {
                 toggleHitboxes();
@@ -5088,6 +5629,7 @@
         // findFace() 가 그리기 고리에서 불린다.
         const eyeVideo = document.getElementById('eye-video');
         const eyeCamBtn = document.getElementById('eye-cam');
+        const eyeRoomBtn = document.getElementById('eye-room');
         const eyePhotoBtn = document.getElementById('eye-photo');
         const eyeFile = document.getElementById('eye-file');
 
@@ -5103,10 +5645,57 @@
 
         const gaze = {
             x: 0, y: 0,        // 화면 안 얼굴 자리 -1~1
+            fill: 0,           // 얼굴이 화면을 채우는 정도 0~1
             has: false,
             yaw: 0, pitch: 0,  // 지금 머리가 돌아간 정도(rad)
             canvas: null,
         };
+
+        const plate = {
+            on: false,
+            // 160x120 은 화면에 늘리면 심하게 깨졌다.
+            w: 480,
+            h: 360,
+            buf: null,        // 배운 배경 (Float32, RGB)
+            age: 0,           // 배운 시간(초)
+            canvas: null,
+            ctx: null,
+            work: null,       // 지금 프레임을 줄여 담는 곳
+            workCtx: null,
+        };
+
+        function plateSetup() {
+            if (plate.canvas) return;
+
+            plate.canvas = document.getElementById('room-plate');
+            plate.ctx = plate.canvas.getContext('2d');
+            plate.canvas.width = plate.w;
+            plate.canvas.height = plate.h;
+
+            plate.work = document.createElement('canvas');
+            plate.work.width = plate.w;
+            plate.work.height = plate.h;
+            plate.workCtx = plate.work.getContext('2d',
+                { willReadFrequently: true });
+        }
+
+        // 카메라 속 사람이 상대인가.
+        //
+        // 이 값은 animate() 보다 위에 있어야 한다. 아래에 두었더니
+        // 첫 프레임에서 updatePerson 이 아직 만들어지지 않은 것을
+        // 읽으려 해서 화면이 통째로 멈췄다(_verify_screen.py 가 잡았다).
+        const person = {
+            on: false,
+            dist: 1.6,        // 지금 어림잡은 거리(m)
+        };
+
+        // 카메라 화각의 절반. 웹캠은 대개 가로 60도쯤이다.
+        const PERSON_HALF_FOV = 0.52;      // rad (약 30도)
+
+        // 얼굴이 화면을 채우는 정도로 거리를 어림한다.
+        // 가까울수록 살색 점이 많아진다.
+        const PERSON_NEAR = 0.75;          // 가장 가까울 때(m)
+        const PERSON_FAR = 3.0;            // 가장 멀 때(m)
 
         const GAZE_MAX_YAW = 0.42;    // 고개를 좌우로 돌리는 한계(rad)
         const GAZE_MAX_PITCH = 0.22;  // 위아래
@@ -5125,9 +5714,16 @@
             // 상대가 먼저 움직이고, 다이아는 그 자리를 보고 정한다.
             // 순서가 뒤집히면 한 프레임 늦은 자리를 보게 된다.
             updateUser(deltaTime);
+
+            // 얼굴을 먼저 찾아야 그 자리로 상대를 옮길 수 있다.
+            // updateUser 뒤에 두는 것은 방향키로 움직인 뒤에
+            // 카메라가 본 자리로 덮어쓰기 위해서다.
+            findFace();
+            updatePerson(deltaTime);
+            plateStep(deltaTime);
+
             updateNotice();
             updateKissWait();
-            findFace();
             updateGaze(deltaTime);
 
 
@@ -5337,6 +5933,9 @@
                 );
             }
 
+
+            // 배는 자세보다 앞이다. 정점을 미는 것이라 뼈와 싸우지 않는다.
+            updateBelly(deltaTime);
 
             // 옷이 걸어간 만큼 몸도 따라간다
             followBody();
@@ -5639,11 +6238,28 @@
                 myAffinity = d.affinity;
                 myStageKey = d.stage;
                 affinityShown = null;      // 변화량 표시가 튀지 않게
+
+                // 사이만 바꾸고 나머지를 그대로 두면 이름표가 거짓말을 한다.
+                //
+                // 순종은 얀데레에서만 쌓이는 것인데, 기억을 치운 뒤에도
+                // 화면이 옛 값을 들고 있어서 '서먹함 · 순종 50' 처럼 떴다.
+                // 서버는 이미 0 으로 비웠는데 화면만 몰랐다.
+                myDevotion.level = 0;
+                myDevotion.raw = 0;
+                myDevotion.label = null;
+                myMood.level = 0;
+                myMood.label = null;
+                myLover.yes = false;
                 buildAffinityMarks();
                 setAffinity(d.affinity, d.stage_label);
                 buildToolMenu();
 
                 applyExpression('neutral');
+
+                // 서버가 준 값으로 다시 맞춘다.
+                // 어떤 경로로 바뀌었든 화면이 따라가게 하는 마지막 그물이다.
+                refreshRelationship();
+
                 resetTimers();
                 startInactivityTimers();
 
@@ -5903,7 +6519,7 @@
                     return;
                 }
 
-                setPregnant(d.pregnant);
+                setPregnant(d.pregnant, false);
 
                 myDevotion.level = d.devotion;
                 myDevotion.raw = d.devotion_raw;
@@ -6058,6 +6674,456 @@
         });
 
 
+        // ============================================================
+        // 방 짓기
+        //
+        // 카메라 영상을 배경에 붙이는 것과는 다르다. 그건 사진 앞에
+        // 세워 둔 것이고, 이건 다이아가 그 안에 서 있는 것이다.
+        //
+        // 사진을 한 번 읽어 색과 밝기만 받아 오고(/api/room),
+        // 그 값으로 벽과 바닥을 세운다. 그러면
+        //   - 카메라를 꺼도 방이 남는다
+        //   - 걸어가면 벽이 지나간다
+        //   - 발밑에 그림자가 진다
+        //   - 방의 빛이 다이아에게도 든다
+        //
+        // 벽은 원통으로 만든다. 네모 방을 지으면 어느 각도에서 보든
+        // 모서리가 보이는데, 카메라가 본 것은 방의 한쪽뿐이라
+        // 모서리 자리를 알 수 없다. 원통이면 어디서 봐도 어색하지 않다.
+        // ============================================================
+
+        const builtRoom = {
+            on: false,
+            group: null,
+            name: null,
+            saved: null,      // 원래 조명
+        };
+
+        function clearBuiltRoom() {
+            if (!builtRoom.group) return;
+
+            builtRoom.group.traverse(o => {
+                if (o.geometry) o.geometry.dispose();
+                if (o.material) o.material.dispose();
+            });
+            scene.remove(builtRoom.group);
+            builtRoom.group = null;
+        }
+
+        function buildRoomFrom(spec) {
+            clearBuiltRoom();
+
+            const wall = new THREE.Color(spec.wall || '#3a3d5c');
+            const floorC = new THREE.Color(spec.floor || '#2a2d44');
+            const lightC = new THREE.Color(spec.light || '#fff4e8');
+            const bright = Math.max(0, Math.min(100, spec.bright || 45)) / 100;
+
+            const g = new THREE.Group();
+
+            // 방은 네모로 짓는다.
+            //
+            // 처음에 원통으로 지었더니 은색 관 안에 들어와 있는 것 같았다.
+            // 모서리가 없으면 방이 아니다 — 사람은 벽과 벽이 만나는 선,
+            // 벽과 바닥이 만나는 선을 보고 '방 안' 이라고 느낀다.
+            // 곡면에는 그 선이 없어서 어디가 어디인지 알 수가 없다.
+            const W = 7.0;          // 한 변의 절반
+            const H = 3.0;          // 천장 높이
+            const y0 = FLOOR_Y;
+
+            // 빛을 받는 재질을 쓴다.
+            //
+            // MeshBasicMaterial 은 조명을 아예 안 받아서 어느 벽이든
+            // 똑같은 색으로 칠해진다. 그래서 금속판처럼 보였다.
+            // Lambert 는 빛이 드는 쪽과 그늘진 쪽이 갈린다.
+            const wallMat = () => new THREE.MeshLambertMaterial({
+                color: wall,
+                side: THREE.FrontSide,
+            });
+
+            function plane(w, h, mat) {
+                return new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+            }
+
+            // 벽 넷. 안쪽을 보게 돌려 세운다.
+            const back = plane(W * 2, H, wallMat());
+            back.position.set(0, y0 + H / 2, -W);
+            g.add(back);
+
+            const front = plane(W * 2, H, wallMat());
+            front.position.set(0, y0 + H / 2, W);
+            front.rotation.y = Math.PI;
+            g.add(front);
+
+            const left = plane(W * 2, H, wallMat());
+            left.position.set(-W, y0 + H / 2, 0);
+            left.rotation.y = Math.PI / 2;
+            g.add(left);
+
+            const right = plane(W * 2, H, wallMat());
+            right.position.set(W, y0 + H / 2, 0);
+            right.rotation.y = -Math.PI / 2;
+            g.add(right);
+
+            // 천장. 벽보다 조금 밝게 — 전등이 거기 있으므로.
+            const ceil = plane(W * 2, W * 2, new THREE.MeshLambertMaterial({
+                color: wall.clone().lerp(new THREE.Color(0xffffff), 0.18),
+            }));
+            ceil.position.set(0, y0 + H, 0);
+            ceil.rotation.x = Math.PI / 2;
+            g.add(ceil);
+
+            // 바닥
+            const floor = plane(W * 2, W * 2, new THREE.MeshLambertMaterial({
+                color: floorC,
+            }));
+            floor.position.set(0, y0 + 0.001, 0);
+            floor.rotation.x = -Math.PI / 2;
+            g.add(floor);
+
+            // 벽과 바닥이 만나는 자리의 그늘.
+            //
+            // 실제 방에서는 그 선을 따라 빛이 잘 안 든다. 그 어둠이
+            // 있어야 벽이 바닥에 '닿아' 보인다. 없으면 벽이 떠 있다.
+            const skirt = 0.55;
+            const shade = new THREE.MeshBasicMaterial({
+                map: makeEdgeShade(),
+                transparent: true,
+                depthWrite: false,
+            });
+
+            [[0, -W, 0], [0, W, Math.PI], [-W, 0, Math.PI / 2],
+             [W, 0, -Math.PI / 2]].forEach(([x, z, ry]) => {
+                const m = plane(W * 2, skirt, shade);
+                m.position.set(x, y0 + skirt / 2, z);
+                m.rotation.y = ry;
+                m.renderOrder = -2;
+                g.add(m);
+            });
+
+            scene.add(g);
+            builtRoom.group = g;
+
+            // 방의 빛을 다이아에게도 넣는다.
+            // 배경만 갈아 끼우고 조명이 그대로면 오려 붙인 것으로 보인다.
+            if (!builtRoom.saved) {
+                builtRoom.saved = {
+                    // 방향도 바꾸므로 함께 적어 둔다.
+                    // 안 그러면 방을 걷은 뒤에도 빛이 옆에서 든다.
+                    keyPos: light.position.clone(),
+                    key: { c: light.color.clone(), i: light.intensity },
+                    rim: { c: rimLight.color.clone(), i: rimLight.intensity },
+                    shape: { c: shapeLight.color.clone(), i: shapeLight.intensity },
+                    fill: { c: fillLight.color.clone(), i: fillLight.intensity },
+                    amb: { c: ambientLight.color.clone(), i: ambientLight.intensity },
+                };
+            }
+
+            const power = 0.5 + bright * 1.3;
+
+            // 주광은 위에서 비스듬히. 벽마다 밝기가 갈려야 모서리가 산다.
+            light.color.copy(lightC);
+            light.intensity = power;
+            light.position.set(0.6, 1.4, 0.5).normalize();
+
+            shapeLight.color.copy(lightC);
+            shapeLight.intensity = power * 0.35;
+
+            // 바닥에서 되비치는 빛은 바닥 색을 띤다
+            fillLight.color.copy(floorC);
+            fillLight.intensity = 0.12 + bright * 0.3;
+
+            // 벽에서 되비치는 빛.
+            //
+            // 너무 세면 모든 면이 같은 밝기가 되어 다시 관이 된다.
+            // 모서리가 보일 만큼만 남긴다.
+            ambientLight.color.copy(wall);
+            ambientLight.intensity = 0.18 + bright * 0.3;
+
+            rimLight.intensity = 0.25 + bright * 0.25;
+
+            builtRoom.on = true;
+            builtRoom.name = spec.name || '방';
+        }
+
+        // 아래로 갈수록 짙어지는 그늘. 벽 밑동에 깐다.
+        function makeEdgeShade() {
+            const c = document.createElement('canvas');
+            c.width = 4;
+            c.height = 64;
+
+            const x = c.getContext('2d');
+            const grad = x.createLinearGradient(0, 0, 0, 64);
+            grad.addColorStop(0.0, 'rgba(0,0,0,0)');       // 위
+            grad.addColorStop(1.0, 'rgba(0,0,0,0.38)');    // 바닥에 닿는 쪽
+
+            x.fillStyle = grad;
+            x.fillRect(0, 0, 4, 64);
+
+            return new THREE.CanvasTexture(c);
+        }
+
+
+        function tearDownRoom() {
+            clearBuiltRoom();
+
+            if (builtRoom.saved) {
+                const v = builtRoom.saved;
+                light.color.copy(v.key.c); light.intensity = v.key.i;
+                if (v.keyPos) light.position.copy(v.keyPos);
+                rimLight.color.copy(v.rim.c); rimLight.intensity = v.rim.i;
+                shapeLight.color.copy(v.shape.c); shapeLight.intensity = v.shape.i;
+                fillLight.color.copy(v.fill.c); fillLight.intensity = v.fill.i;
+                ambientLight.color.copy(v.amb.c); ambientLight.intensity = v.amb.i;
+                builtRoom.saved = null;
+            }
+
+            setFloorVisible(true);
+            builtRoom.on = false;
+            builtRoom.name = null;
+        }
+
+        // 카메라로 한 장 찍어 그 곳을 읽고 방을 짓는다
+        async function readRoomAndBuild() {
+            if (!eye.stream) {
+                await toggleCamera();
+                if (!eye.stream) return;
+            }
+
+            if (!eyeVideo.videoWidth) {
+                showHint('카메라가 아직 준비되지 않았습니다', 2600);
+                return;
+            }
+
+            showHint('이 곳을 보는 중…', 3000);
+
+            const c = document.createElement('canvas');
+            c.width = 512;
+            c.height = Math.round(512 * eyeVideo.videoHeight / eyeVideo.videoWidth);
+            c.getContext('2d').drawImage(eyeVideo, 0, 0, c.width, c.height);
+
+            try {
+                const d = await fetch('/api/room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image: c.toDataURL('image/jpeg', 0.8),
+                    }),
+                }).then(r => r.json());
+
+                if (!d.ok) {
+                    showHint('이 곳을 읽지 못했습니다', 3000);
+                    return;
+                }
+
+                // 영상 배경과 지은 방을 둘 다 켜면 겹친다
+                if (room.on) stopRoom();
+
+                setFloorVisible(false);
+                buildRoomFrom(d.room);
+
+                appendMessage('ai',
+                    '여기를 ' + (d.read ? '' : '못 읽어서 그냥 ')
+                    + builtRoom.name + '으로 지었습니다.'
+                    + (d.read
+                        ? ' (벽 ' + d.room.wall
+                          + ' · 바닥 ' + d.room.floor
+                          + ' · 밝기 ' + d.room.bright + ')'
+                        : ''));
+
+                showHint('다이아가 ' + builtRoom.name + '에 있습니다', 4000);
+
+            } catch (e) {
+                console.warn('[diamondAI] 방 읽기 실패', e);
+                showHint('이 곳을 읽지 못했습니다', 3000);
+            }
+        }
+
+        async function toggleBuiltRoom() {
+            if (builtRoom.on) {
+                tearDownRoom();
+                showHint('방을 걷었습니다', 2600);
+                return;
+            }
+            await readRoomAndBuild();
+        }
+
+
+        // ============================================================
+        // 방 겹치기
+        //
+        // 카메라에 비친 곳을 다이아 뒤에 깔고, 그 빛으로 다이아를 비춘다.
+        // 배경만 갈아 끼우면 사람은 금방 알아챈다 — 방은 노란 전등인데
+        // 다이아만 파란 빛을 받고 있으면 오려 붙인 것으로 보인다.
+        //
+        // 그래서 영상에서 밝기와 색을 읽어 조명에 그대로 넣는다.
+        // 어두운 방에서는 다이아도 어두워지고, 노란 방에서는 노랗게 물든다.
+        //
+        // 화면 전체를 읽지 않는다. 32x24 로 줄여서 읽는다 —
+        // 평균을 내는 데는 그만큼이면 충분하고 매 프레임 해도 가볍다.
+        // ============================================================
+
+        const room = {
+            on: false,
+            timer: null,
+            // 조명을 되돌리려면 원래 값을 알아야 한다
+            saved: null,
+            // 갑자기 밝기가 튀지 않게 천천히 따라간다
+            lit: null,
+        };
+
+        const roomVideo = document.getElementById('room-video');
+        const roomCanvas = document.createElement('canvas');
+        roomCanvas.width = 32;
+        roomCanvas.height = 24;
+        const roomCtx = roomCanvas.getContext('2d', { willReadFrequently: true });
+
+        function saveLights() {
+            if (room.saved) return;
+            room.saved = {
+                key: { color: light.color.clone(), power: light.intensity },
+                rim: { color: rimLight.color.clone(), power: rimLight.intensity },
+                shape: { color: shapeLight.color.clone(), power: shapeLight.intensity },
+                fill: { color: fillLight.color.clone(), power: fillLight.intensity },
+                amb: { color: ambientLight.color.clone(), power: ambientLight.intensity },
+            };
+        }
+
+        function restoreLights() {
+            if (!room.saved) return;
+            const v = room.saved;
+            light.color.copy(v.key.color); light.intensity = v.key.power;
+            rimLight.color.copy(v.rim.color); rimLight.intensity = v.rim.power;
+            shapeLight.color.copy(v.shape.color); shapeLight.intensity = v.shape.power;
+            fillLight.color.copy(v.fill.color); fillLight.intensity = v.fill.power;
+            ambientLight.color.copy(v.amb.color); ambientLight.intensity = v.amb.power;
+            room.saved = null;
+            room.lit = null;
+        }
+
+        // 영상에서 밝기와 색을 읽는다.
+        //
+        // 위쪽 절반과 아래쪽 절반을 따로 읽는다. 방의 빛은 대개 위에서
+        // 내려오므로, 위가 밝으면 주광을 세우고 아래가 밝으면 바닥에서
+        // 되비치는 빛이 있다는 뜻이다.
+        function readRoom() {
+            if (!roomVideo.videoWidth) return null;
+
+            roomCtx.drawImage(roomVideo, 0, 0, 32, 24);
+            const d = roomCtx.getImageData(0, 0, 32, 24).data;
+
+            let tr = 0, tg = 0, tb = 0, n = 0;
+            let ur = 0, ug = 0, ub = 0, un = 0;
+            let lr = 0, lg = 0, lb = 0, ln = 0;
+
+            for (let y = 0; y < 24; y++) {
+                for (let x = 0; x < 32; x++) {
+                    const i = (y * 32 + x) * 4;
+                    const r = d[i], g = d[i + 1], b = d[i + 2];
+                    tr += r; tg += g; tb += b; n++;
+                    if (y < 12) { ur += r; ug += g; ub += b; un++; }
+                    else { lr += r; lg += g; lb += b; ln++; }
+                }
+            }
+
+            const mean = (a, c) => a / Math.max(1, c) / 255;
+
+            return {
+                r: mean(tr, n), g: mean(tg, n), b: mean(tb, n),
+                up: (mean(ur, un) + mean(ug, un) + mean(ub, un)) / 3,
+                down: (mean(lr, ln) + mean(lg, ln) + mean(lb, ln)) / 3,
+            };
+        }
+
+        function litFromRoom() {
+            const v = readRoom();
+            if (!v) return;
+
+            const bright = (v.r + v.g + v.b) / 3;
+
+            // 색만 남기고 밝기는 떼어 낸다.
+            // 안 그러면 어두운 방에서 색까지 시커메진다.
+            const m = Math.max(0.001, bright);
+            const tint = {
+                r: Math.min(1.6, v.r / m),
+                g: Math.min(1.6, v.g / m),
+                b: Math.min(1.6, v.b / m),
+            };
+
+            if (!room.lit) {
+                room.lit = { bright: bright, up: v.up, down: v.down, tint: tint };
+            } else {
+                // 천천히 따라간다. 손이 카메라를 스쳐도 조명이 깜빡이지 않게.
+                const k = 0.08;
+                const L = room.lit;
+                L.bright += (bright - L.bright) * k;
+                L.up += (v.up - L.up) * k;
+                L.down += (v.down - L.down) * k;
+                L.tint.r += (tint.r - L.tint.r) * k;
+                L.tint.g += (tint.g - L.tint.g) * k;
+                L.tint.b += (tint.b - L.tint.b) * k;
+            }
+
+            const L = room.lit;
+
+            // 방이 아주 어두워도 얼굴은 보여야 한다. 바닥을 깔아 둔다.
+            const power = 0.35 + L.bright * 1.5;
+
+            light.color.setRGB(L.tint.r, L.tint.g, L.tint.b);
+            light.intensity = power * (0.5 + L.up);
+
+            shapeLight.color.setRGB(L.tint.r, L.tint.g, L.tint.b);
+            shapeLight.intensity = power * 0.4;
+
+            // 바닥에서 되비치는 빛
+            fillLight.color.setRGB(L.tint.r, L.tint.g, L.tint.b);
+            fillLight.intensity = power * L.down * 0.5;
+
+            // 윤곽광은 방 색의 보색 쪽으로 살짝 남겨 둔다.
+            // 이게 없으면 배경에 눌러 붙어 보인다.
+            rimLight.intensity = 0.35 + L.bright * 0.3;
+
+            ambientLight.color.setRGB(L.tint.r, L.tint.g, L.tint.b);
+            ambientLight.intensity = 0.18 + L.bright * 0.45;
+        }
+
+        async function toggleRoom() {
+            if (room.on) { stopRoom(); return; }
+
+            // 카메라가 꺼져 있으면 켠다. 같은 영상을 나눠 쓴다.
+            if (!eye.stream) {
+                await toggleCamera();
+                if (!eye.stream) return;
+            }
+
+            roomVideo.srcObject = eye.stream;
+            if (!plate.on) roomVideo.classList.add('on');
+            avatarContainer.classList.add('room');
+            eyeRoomBtn.classList.add('on');
+
+            saveLights();
+            room.on = true;
+
+            // 바닥과 그림자는 방에 이미 바닥이 있으니 흐리게 한다
+            setFloorVisible(false);
+
+            room.timer = setInterval(litFromRoom, 120);
+
+            showHint('다이아가 지금 그 방에 있습니다', 4000);
+        }
+
+        function stopRoom() {
+            if (room.timer) { clearInterval(room.timer); room.timer = null; }
+            roomVideo.srcObject = null;
+            roomVideo.classList.remove('on');
+            avatarContainer.classList.remove('room');
+            eyeRoomBtn.classList.remove('on');
+            restoreLights();
+            setFloorVisible(true);
+            room.on = false;
+            showHint('방 겹치기를 껐습니다', 2600);
+        }
+
+
         // ------------------------------------------------------------
         // 카메라
         // ------------------------------------------------------------
@@ -6090,6 +7156,15 @@
         }
 
         function stopCamera() {
+            // 방과 사람 모드는 이 영상을 나눠 쓴다. 끊기면 같이 끝난다.
+            if (person.on) {
+                person.on = false;
+                eyeRoomBtn.classList.remove('on');
+                userBody.visible = true;
+            }
+            plateOff();
+            if (room.on) stopRoom();
+
             if (eye.timer) { clearInterval(eye.timer); eye.timer = null; }
             if (eye.stream) {
                 eye.stream.getTracks().forEach(t => t.stop());
@@ -6144,6 +7219,7 @@
         }
 
         eyeCamBtn.addEventListener('click', toggleCamera);
+        eyeRoomBtn.addEventListener('click', togglePerson);
 
         // 창을 닫을 때 카메라 불이 켜진 채로 남지 않게
         window.addEventListener('beforeunload', () => {
@@ -6316,6 +7392,199 @@
 
 
         // ============================================================
+        // ============================================================
+        // 사람 없는 배경 만들기  — 보류 중 (2026-08-19)
+        //
+        // 지금은 쓰지 않는다. `/배경지우기` 로만 켜 볼 수 있다.
+        // 두 가지가 안 됐다.
+        //   하나. 한자리에 서 있으면 그 사람이 배경으로 굳어 계속 보인다
+        //   둘.  줄여서 배우고 늘려 그리니 심하게 깨졌다 (해상도를 올려 뒀다)
+        //
+        // 제대로 하려면 사람을 오려내는 쪽(MediaPipe 같은)이 맞다.
+        // 시간으로 배우는 이 방법은 사람이 계속 움직여야만 통한다.
+        //
+        // 카메라 영상을 그대로 깔면 내 모습이 배경에 같이 들어간다.
+        // 다이아 뒤에 내가 서 있는 꼴이다. 내가 있는 '공간' 만 남기려면
+        // 사람을 지워야 한다.
+        //
+        // 사람을 오려내는 라이브러리는 쓰지 않는다. 대신 시간을 쓴다.
+        //
+        // 방은 가만히 있고 사람은 움직인다. 그러니 칸마다 지금 색이
+        // 지금까지 봐 온 색과 비슷하면 '방' 이고, 갑자기 달라졌으면
+        // '사람이 지나간 것' 이다. 방이면 천천히 받아들이고 사람이면
+        // 받아들이지 않는다. 그러면 사람이 지나간 자리에는 사람이 오기
+        // 전의 방이 남는다.
+        //
+        // 처음 몇 초는 사람도 같이 박힌다. 그래서 처음에는 빨리 배우고
+        // 점점 느리게 배운다 — 방을 얼른 채우되 사람은 안 굳게.
+        // ============================================================
+
+
+        function plateReset() {
+            plate.buf = null;
+            plate.age = 0;
+        }
+
+        function plateStep(dt) {
+            if (!plate.on || !eye.on || !eyeVideo.videoWidth) return;
+
+            plateSetup();
+
+            const W = plate.w, H = plate.h;
+            plate.workCtx.drawImage(eyeVideo, 0, 0, W, H);
+            const now = plate.workCtx.getImageData(0, 0, W, H);
+            const d = now.data;
+
+            if (!plate.buf) {
+                // 첫 프레임은 통째로 받는다. 사람도 같이 들어오지만
+                // 곧 지워진다.
+                plate.buf = new Float32Array(W * H * 3);
+                for (let i = 0, p = 0; i < d.length; i += 4, p += 3) {
+                    plate.buf[p] = d[i];
+                    plate.buf[p + 1] = d[i + 1];
+                    plate.buf[p + 2] = d[i + 2];
+                }
+                plate.age = 0;
+                return;
+            }
+
+            plate.age += dt;
+
+            // 처음에는 빨리 배우고 점점 느리게.
+            // 5초쯤이면 방이 거의 다 채워진다.
+            const learn = Math.max(0.02, 0.6 / (1 + plate.age * 2.5));
+
+            const buf = plate.buf;
+
+            for (let i = 0, p = 0; i < d.length; i += 4, p += 3) {
+                const dr = d[i] - buf[p];
+                const dg = d[i + 1] - buf[p + 1];
+                const db = d[i + 2] - buf[p + 2];
+
+                const diff = Math.abs(dr) + Math.abs(dg) + Math.abs(db);
+
+                // 많이 달라졌으면 사람이 지나가는 중이다. 거의 안 받는다.
+                // 아주 조금만 받는 것은, 방의 조명이 바뀌었을 때도
+                // 언젠가는 따라가야 하기 때문이다.
+                const k = diff > 90 ? learn * 0.02 : learn;
+
+                buf[p] += dr * k;
+                buf[p + 1] += dg * k;
+                buf[p + 2] += db * k;
+
+                d[i] = buf[p];
+                d[i + 1] = buf[p + 1];
+                d[i + 2] = buf[p + 2];
+            }
+
+            plate.ctx.putImageData(now, 0, 0);
+        }
+
+        function plateOn() {
+            plateSetup();
+            plateReset();
+            plate.on = true;
+            plate.canvas.classList.add('on');
+            roomVideo.classList.remove('on');
+        }
+
+        function plateOff() {
+            plate.on = false;
+            if (plate.canvas) plate.canvas.classList.remove('on');
+            plateReset();
+        }
+
+
+        // ============================================================
+        // 카메라 속 사람이 상대다
+        //
+        // 지금까지 다이아 앞에 있는 것은 눈에 안 보이는 더미였다.
+        // 방향키로 움직이는 그 몸을 보고 다이아가 고개를 돌렸다.
+        //
+        // 카메라를 켜면 진짜 사람이 저기 있는데, 다이아는 여전히
+        // 더미를 보고 있었다. 그래서 화면 속 나를 보고 말하는 것이
+        // 아니라 허공을 보고 말하는 것처럼 보였다.
+        //
+        // 고치는 길은 새 장치를 만드는 것이 아니라 **더미를 옮기는 것**
+        // 이다. 카메라 속 얼굴이 있는 자리로 더미를 데려다 놓으면,
+        // 몸 돌리기·다가오기·입맞춤·닿는 거리까지 이미 있는 것들이
+        // 전부 그대로 따라온다. 새로 이을 데가 없다.
+        // ============================================================
+
+        function updatePerson(dt) {
+            if (!person.on) return;
+
+            // 사람이 안 보이면 있던 자리를 지킨다.
+            // 잠깐 화면을 벗어났다고 다이아가 홱 돌아서면 어지럽다.
+            if (!gaze.has || !eye.on) return;
+
+            // 살색 점이 화면을 얼마나 채우는가. 0~1.
+            const fill = Math.min(1, gaze.fill || 0);
+
+            // 채우는 정도가 거리다. 제곱근을 쓰는 것은 넓이가
+            // 거리의 제곱에 반비례하기 때문이다.
+            const t = Math.min(1, Math.sqrt(fill / 0.22));
+            const want = PERSON_FAR + (PERSON_NEAR - PERSON_FAR) * t;
+
+            person.dist += (want - person.dist) * Math.min(1, dt * 1.2);
+
+            // 화면 가로 자리를 각도로 바꾼다.
+            //
+            // 배경을 거울로 뒤집어 깔았으므로, 내가 오른쪽으로 가면
+            // 배경 속 나도 오른쪽으로 간다. 다이아도 그쪽으로 돌아야
+            // 눈이 맞는다. gaze.x 는 실제 방향이라 여기서 한 번 뒤집는다.
+            const ang = -gaze.x * PERSON_HALF_FOV;
+
+            // 다이아 앞쪽(+z)에 세운다.
+            const tx = Math.sin(ang) * person.dist;
+            const tz = Math.cos(ang) * person.dist;
+
+            // 천천히 옮긴다. 살색 판정이 한 프레임 튀어도 몸이 안 흔들리게.
+            const k = Math.min(1, dt * 2.0);
+            user.x += (tx - user.x) * k;
+            user.z += (tz - user.z) * k;
+
+            // 상대는 다이아를 보고 있다고 둔다
+            user.yaw = Math.atan2(roam.x - user.x, roam.z - user.z);
+        }
+
+        function togglePerson() {
+            if (person.on) {
+                person.on = false;
+                eyeRoomBtn.classList.remove('on');
+                userBody.visible = true;
+                plateOff();
+                if (room.on) stopRoom();
+                showHint('앞에 있는 몸을 다시 상대로 봅니다', 3000);
+                return;
+            }
+
+            // 카메라가 있어야 사람을 볼 수 있다
+            if (!eye.stream) {
+                toggleCamera().then(() => {
+                    if (eye.stream) startPerson();
+                });
+                return;
+            }
+            startPerson();
+        }
+
+        function startPerson() {
+            // 카메라에 비친 곳을 배경으로 깐다.
+            // 지은 방과는 같이 못 쓴다 — 배경이 둘이 된다.
+            if (builtRoom.on) tearDownRoom();
+            if (!room.on) toggleRoom();
+
+            person.on = true;
+            eyeRoomBtn.classList.add('on');
+
+            // 더미는 감춘다. 카메라 속 사람이 그 자리를 대신한다.
+            userBody.visible = false;
+
+            showHint('카메라에 보이는 사람을 상대로 봅니다', 4200);
+        }
+
+
         // 시선 — 얼굴이 있는 쪽을 본다
         //
         // 카메라가 눈이 됐는데 늘 정면만 보면 눈이 아니다.
@@ -6370,6 +7639,10 @@
 
             gaze.has = true;
 
+            // 얼굴이 화면을 채우는 정도. 거리를 어림하는 데 쓴다.
+            // 무게는 최대 2 이므로 칸 수의 두 배로 나눈다.
+            gaze.fill = hits / (c.width * c.height * 2);
+
             // 화면은 거울로 보여 주지만 좌표는 안 뒤집혀 있다.
             // 화면에서 오른쪽에 있으면 실제로는 내 왼쪽이므로 뒤집는다.
             gaze.x = -(((px / hits) / c.width) * 2 - 1);
@@ -6386,7 +7659,162 @@
         }
 
 
+        // ============================================================
+        // 상황
+        //
+        // 괄호로 상황을 쓸 수 있는데 매번 생각해 내야 하는 것이 일이다.
+        // 그래서 지금 흐름에 맞는 것을 몇 개 지어 준다.
+        //
+        // 짓는 것은 모델이지만 **고르는 것은 사람이다.** 클릭하지 않으면
+        // 아무 일도 안 일어나고, 직접 쓰는 칸이 따로 있다.
+        // 다이아가 제 이야기를 스스로 진행시키면 그건 대화가 아니다.
+        //
+        // 보기를 짓는 것도 모델을 부르는 일이라, 답을 마친 뒤에
+        // 뒤에서 조용히 짓는다. 사람이 읽는 동안 준비된다.
+        // ============================================================
+
+        const sitChips = document.getElementById('situation-chips');
+        const sitInput = document.getElementById('situation-input');
+        const sitSend = document.getElementById('situation-send');
+        const sitNew = document.getElementById('situation-new');
+
+        let sitBusy = false;
+
+        function showSituations(items) {
+            sitChips.innerHTML = '';
+
+            if (!items || !items.length) {
+                const d = document.createElement('div');
+                d.className = 'waiting';
+                d.textContent = '(상황 보기가 아직 없다 — ↻ 로 지어 본다)';
+                sitChips.appendChild(d);
+                return;
+            }
+
+            items.forEach(t => {
+                const b = document.createElement('button');
+                b.textContent = '(' + t + ')';
+                b.addEventListener('click', () => sendSituation(t));
+                sitChips.appendChild(b);
+            });
+        }
+
+        async function makeSituations() {
+            if (sitBusy) return;
+            sitBusy = true;
+            sitNew.disabled = true;
+
+            sitChips.innerHTML =
+                '<div class="waiting">상황을 짓는 중…</div>';
+
+            try {
+                const d = await fetch('/api/suggest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}',
+                }).then(r => r.json());
+
+                showSituations(d.ok ? d.items : null);
+
+            } catch (e) {
+                console.warn('[diamondAI] 상황 짓기 실패:', e);
+                showSituations(null);
+            } finally {
+                sitBusy = false;
+                sitNew.disabled = false;
+            }
+        }
+
+        // 상황 하나를 보낸다.
+        //
+        // 괄호로 감싸서 보내면 지금까지 쓰던 '글로 만지기' 가 그대로
+        // 받는다. 아는 행동이면 표를 태우고, 모르는 행동이면 모델이
+        // 상황으로 읽는다. 새로 만든 길이 아니라 있던 길이다.
+        // 두 칸을 하나로 보낸다.
+        //
+        // 상황만 썼으면 상황만, 말만 썼으면 말만, 둘 다 썼으면 함께 나간다.
+        //   (다이아를 지긋이 바라본다) 다이아 사랑해
+        //
+        // 따로 보내면 두 줄이 되어 다이아가 두 번 답한다. 사람은 그렇게
+        // 말하지 않는다 — 바라보면서 말하는 것은 한 번의 일이다.
+        //
+        // 어느 칸에서 엔터를 누르든 여기로 온다.
+        function sendBoth() {
+            const sit = String(sitInput.value || '')
+                .trim().replace(/^\(|\)$/g, '').trim();
+            const msg = String(chatInput.value || '').trim();
+
+            if (!sit && !msg) return;
+
+            chatInput.value = sit
+                ? ('(' + sit + ')' + (msg ? ' ' + msg : ''))
+                : msg;
+
+            sitInput.value = '';
+            sendMessage();
+        }
+
+        sitSend.addEventListener('click', sendBoth);
+
+        sitInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendBoth();
+            }
+        });
+
+        sitNew.addEventListener('click', makeSituations);
+
+
         // 목소리를 켜고 끈다.
+        // 카메라에 비친 방에 다이아를 세운다
+        function handleRoomCommand(text) {
+            const t = text.replace(/\s+/g, '');
+
+            // 배경에서 사람을 지워 본다. 아직 제대로 안 된다.
+            if (t === '/배경지우기') {
+                appendMessage('user', text);
+                if (plate.on) {
+                    plateOff();
+                    if (room.on) roomVideo.classList.add('on');
+                    appendMessage('ai', '영상 배경으로 되돌렸습니다.');
+                } else {
+                    if (!room.on) toggleRoom();
+                    plateOn();
+                    appendMessage('ai',
+                        '배경에서 사람을 지워 봅니다. 아직 잘 안 됩니다 — '
+                        + '가만히 서 있으면 그대로 배경이 되고, 화질도 떨어집니다.');
+                }
+                return true;
+            }
+
+            // 카메라 속 사람을 상대로 본다
+            if (t === '/사람' || t === '/나') {
+                appendMessage('user', text);
+                togglePerson();
+                return true;
+            }
+
+            // 이 곳을 읽어 진짜 방을 짓는다
+            if (t === '/방' || t === '/방짓기') {
+                appendMessage('user', text);
+                toggleBuiltRoom();
+                return true;
+            }
+
+            // 카메라 영상을 그대로 배경에 깐다.
+            // 방을 짓는 것과 다르다 — 이건 사진 앞에 세워 두는 것이다.
+            if (t === '/방영상' || t === '/캠배경') {
+                appendMessage('user', text);
+                if (builtRoom.on) tearDownRoom();
+                toggleRoom();
+                return true;
+            }
+
+            return false;
+        }
+
+
         function handleVoiceCommand(text) {
 
             const t = text.replace(/\s+/g, '');
@@ -6437,6 +7865,9 @@
 
 /배경      배경 이미지 넘기기 (static/background/ 에 넣는다)
 /목소리    소리 켜고 끄기
+/사람      카메라 속 나를 상대로 (🧍)
+/방        이 곳을 읽어 방 짓기
+/방영상    카메라 영상을 그대로 배경으로
 
 /호감 초기화   사이를 처음으로 (기억은 그대로 둔다)
 /호감 <숫자>   그 값으로 맞추기 (예: /호감 300)
@@ -6608,6 +8039,14 @@
 
             if (
                 handleVoiceCommand(text)
+            ) {
+
+                return;
+            }
+
+
+            if (
+                handleRoomCommand(text)
             ) {
 
                 return;
@@ -6838,6 +8277,9 @@
                         setWalking(false);
                     }
 
+                    // 가까이 오라고 했으면 손이 닿는 데까지 온다
+                    if (data.approach) setApproach(data.approach);
+
                     if (wake) {
 
                         // 자다 깼을 때는 몸이 먼저고 말이 나중이다.
@@ -7030,6 +8472,10 @@
 
 
             startInactivityTimers();
+
+            // 답을 마쳤으니 다음 상황 보기를 뒤에서 짓는다.
+            // 사람이 이 말을 읽는 동안 준비된다.
+            setTimeout(makeSituations, 400);
         }
 
 
@@ -7275,7 +8721,8 @@
 
                     event.preventDefault();
 
-                    sendMessage();
+                    // 상황칸에 써 둔 것이 있으면 함께 나간다
+                    sendBoth();
                 }
             }
         );

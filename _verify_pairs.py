@@ -170,6 +170,42 @@ sil = AVATAR.relationship.get("silence", {})
 print(f"\n  침묵일 때 표정 {face(sil.get('expression'))} · 말풍선 \"{sil.get('note')}\"")
 
 
+
+# 놀란 얼굴이 아무 데서나 나오지 않는가
+print()
+print("=" * 74)
+print("놀란 얼굴을 아껴 쓰는가")
+print("=" * 74)
+
+ok_with = AVATAR.touch.get("surprise_only_with", ["shy", "cover"])
+print(f"  (놀람은 {', '.join(ok_with)} 과(와) 함께일 때만. "
+      f"그 밖에는 자다 깰 때와 상대가 놀래켰을 때뿐이다)")
+
+loose = []
+for z in AVATAR.touch_zones():
+    for kind, label in (("tap", "누름"), ("pet", "쓰담")):
+        spec = z.tap if kind == "tap" else z.pet
+        if not spec:
+            continue
+        for field in ("expression", "expression_warm", "expression_then"):
+            want = spec.get(field)
+            if not want:
+                continue
+            many = want if isinstance(want, (list, tuple)) else [want]
+            if "surprised" not in many:
+                continue
+            if spec.get("motion") in ok_with:
+                continue
+            loose.append(f"{z.label or z.key} {label} ({field})")
+
+if loose:
+    print(f"\n  부끄러운 몸짓 없이 놀라는 자리 {len(loose)}곳")
+    for x in loose:
+        print(f"     ! {x}")
+else:
+    print("\n  놀람은 전부 부끄러운 몸짓과 함께 나온다.")
+
+
 # 맺음
 print()
 print("=" * 74)

@@ -1054,8 +1054,12 @@ def first_talk_api():
 # 답하면 말투도, 사이도, 기억도 모르는 다른 사람이 답하게 된다.
 # ==================================================================
 
-def _describe(image_b64):
-    """그림에 무엇이 보이는지 한 줄로 받아 온다. 못 보면 None."""
+def _describe(image_b64, prompt=None):
+    """그림에 무엇이 보이는지 받아 온다. 못 보면 None.
+
+    prompt 를 주면 그것으로 묻는다. 방을 읽을 때는 색과 밝기를
+    숫자로 달라고 따로 물어야 해서 이 자리가 필요하다.
+    """
 
     import requests
     from config import OLLAMA_URL, VISION_ENABLED, VISION_MODEL
@@ -1067,7 +1071,7 @@ def _describe(image_b64):
     if not conf.get("enabled", True):
         return None
 
-    prompt = conf.get("look_prompt") or "이 사진에 무엇이 보이는지 한국어로 적어라."
+    prompt = prompt or conf.get("look_prompt")         or "이 사진에 무엇이 보이는지 한국어로 적어라."
 
     r = requests.post(OLLAMA_URL, json={
         "model": VISION_MODEL,
@@ -1087,6 +1091,96 @@ def _describe(image_b64):
 
     seen = ((r.json().get("message") or {}).get("content") or "").strip()
     return seen or None
+
+
+# ============================================================
+# 방 읽기
+#
+# 사진 한 장을 보고 그 곳의 색과 밝기를 숫자로 받아 온다.
+# 화면은 그 값으로 진짜 3D 방을 짓는다 — 카메라 영상을 배경에
+# 붙이는 것과는 다르다. 방이 생기면 카메라를 꺼도 남고,
+# 걸어 다니면 벽이 지나가고 발밑에 그림자가 진다.
+#
+# 모델은 글로 답하려 든다. 그래서 틀을 정해 주고 그 틀만 읽는다.
+# 한 줄이라도 못 읽으면 그 줄만 기본값으로 채운다.
+# ============================================================
+
+def _parse_room(text, fallback):
+    import re as _re
+
+    out = dict(fallback)
+    if not text:
+        return out
+
+    def hex_of(line):
+        m = _re.search(r"#([0-9a-fA-F]{6})", line)
+        return "#" + m.group(1).lower() if m else None
+
+    for raw in str(text).splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+
+        if line.startswith("벽"):
+            v = hex_of(line)
+            if v:
+                out["wall"] = v
+        elif line.startswith("바닥"):
+            v = hex_of(line)
+            if v:
+                out["floor"] = v
+        elif line.startswith("빛색"):
+            v = hex_of(line)
+            if v:
+                out["light"] = v
+        elif line.startswith("밝기"):
+            m = _re.search(r"(\d{1,3})", line)
+            if m:
+                out["bright"] = max(0, min(100, int(m.group(1))))
+        elif line.startswith("실내"):
+            out["indoor"] = ("아니" not in line)
+        elif line.startswith("이름"):
+            v = line.split(":", 1)[-1].strip()
+            v = v.strip("#*· ").strip()
+            if 1 <= len(v) <= 8:
+                out["name"] = v
+
+    return out
+
+
+@app.route("/api/room", methods=["POST"])
+def room_api():
+
+    try:
+        data = request.get_json(silent=True) or {}
+        image = data.get("image")
+
+        conf = AVATAR.vision or {}
+        fallback = conf.get("room_fallback", {})
+
+        if not image or not isinstance(image, str):
+            return jsonify({"ok": False, "error": "그림이 없습니다"}), 400
+
+        if "," in image[:64] and image[:5] == "data:":
+            image = image.split(",", 1)[1]
+
+        seen = _describe(image, prompt=conf.get("room_prompt"))
+
+        if not seen:
+            return jsonify(
+                {"ok": True, "room": dict(fallback), "read": False,
+                 "why": "못 읽어서 기본값으로 지었습니다"}
+            )
+
+        print(f"[방 읽기]:\n{seen}")
+        room = _parse_room(seen, fallback)
+        print(f"[방]: {room}")
+
+        return jsonify({"ok": True, "room": room, "read": True, "raw": seen})
+
+    except Exception as e:
+        print(f"[방 읽기 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route(
@@ -1142,6 +1236,99 @@ def see_api():
 
     except Exception as e:
         print(f"[눈 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route(
+    "/api/suggest",
+    methods=["POST"]
+)
+def suggest_api():
+    """지금 흐름에 맞는 행동 보기를 몇 개 지어 준다.
+
+    짓는 것은 모델이지만 고르는 것은 사람이다.
+    클릭하지 않으면 아무 일도 일어나지 않는다.
+    """
+
+    try:
+        import requests
+
+        from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_OPTIONS, OLLAMA_THINK
+        from memory_manager import load_memory, load_relationship
+
+        conf = (AVATAR.behavior or {}).get("suggest", {})
+        if not conf.get("enabled", True):
+            return jsonify({"ok": True, "items": []})
+
+        saved = load_relationship() or {}
+        stage = AVATAR.stage(saved.get("stage")) or AVATAR.stage_for_affinity(
+            saved.get("affinity", 0))
+
+        count = int(conf.get("count", 4))
+
+        # 방금 나눈 이야기만 준다. 길게 주면 옛 흐름을 짚는다.
+        history = load_memory() or []
+        recent = [
+            {"role": m["role"], "content": str(m["content"]).strip()}
+            for m in history[-6:]
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant")
+        ]
+
+        ask = conf.get("prompt", "").format(count=count, name=AVATAR.name)
+
+        msgs = [{
+            "role": "system",
+            "content": (
+                f"너는 {AVATAR.name}(와)과 상대가 나누는 이야기를 옆에서 보고 "
+                f"있다. 지금 사이는 '{stage.label}' 이다.\n\n" + ask
+            ),
+        }]
+        msgs += recent
+        msgs.append({"role": "user", "content": ask})
+
+        payload = {
+            "model": OLLAMA_MODEL,
+            "messages": msgs,
+            "stream": False,
+            "options": dict(OLLAMA_OPTIONS),
+        }
+        if OLLAMA_THINK is not None:
+            payload["think"] = OLLAMA_THINK
+
+        r = requests.post(OLLAMA_URL, json=payload, timeout=60)
+        if r.status_code != 200:
+            return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 502
+
+        raw = ((r.json().get("message") or {}).get("content") or "")
+
+        drop = conf.get("drop", [])
+        cap = int(conf.get("max_len", 30))
+
+        items = []
+        for line in raw.split("\n"):
+            t = line.strip().strip("-*·•").strip()
+
+            # 번호를 떼어 낸다
+            while t and (t[0].isdigit() or t[0] in ".)]、,"):
+                t = t[1:].lstrip()
+
+            t = t.strip("()（）[]「」\"'").strip()
+
+            if not t or len(t) > cap:
+                continue
+            if any(w in t for w in drop):
+                continue
+            if t in items:
+                continue
+
+            items.append(t)
+            if len(items) >= count:
+                break
+
+        return jsonify({"ok": True, "items": items})
+
+    except Exception as e:
+        print(f"[상황 보기 오류]: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 

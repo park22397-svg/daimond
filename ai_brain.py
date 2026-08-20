@@ -439,6 +439,14 @@ def process_chat(user_text, seeing=None, cut_off=False):
     except Exception:
         walk = None
 
+    # 가까이 오라는 말인지도 같이 읽는다.
+    # 평소 서는 거리에서는 손이 닿지 않아서, 걸어가는 대신
+    # 부를 수도 있어야 한다.
+    try:
+        approach = AVATAR.come_invite(user_text)
+    except Exception:
+        approach = None
+
     def done(reply, expression="neutral", cues=None, silent=False, motion=None):
         # 침묵은 남길 말이 없다. 빈 줄을 기록에 넣으면
         # 나중에 그 자리가 '아무 말도 안 한 답변'처럼 모델에게 보인다.
@@ -456,6 +464,8 @@ def process_chat(user_text, seeing=None, cut_off=False):
             "warm": warm,
             # 같이 걷자고 했는가. 화면이 이걸 보고 발을 풀거나 묶는다.
             "walk": walk,
+            # 가까이 오라고 했는가. 'near' 면 손이 닿는 데까지 온다.
+            "approach": approach,
             # 지금 얼마나 상해 있는가
             "mood": mood_now,
             # 연인인가. 아니면 호감이 광기 앞에서 멈춘다.

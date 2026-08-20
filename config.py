@@ -141,7 +141,7 @@ TTS_MODEL = "gemini-2.5-flash-preview-tts"
 # 사람이 편하게 말하는 속도는 기본보다 조금 빠른 쪽이다.
 # 더 빠르게 하려면 +25%, 느리게 하려면 0% 나 -10% 로.
 TTS_EDGE_VOICE = "ko-KR-SunHiNeural"
-TTS_EDGE_RATE = "+15%"
+TTS_EDGE_RATE = "+28%"
 TTS_EDGE_PITCH = "-2Hz"
 
 # 말투 지시. gemini 는 이 문장대로 읽어 준다.
