@@ -183,10 +183,48 @@ def extract_cues(text):
                     i += 1
                 continue
 
-            # 몸짓도 얼굴도 아니면 소설식 묘사다. 화면에 내보내지 않는다.
+            # 몸짓 이름도 얼굴 이름도 아닌 괄호는 '상황' 이다.
+            #
+            # 예전에는 버렸다. 그래서 다이아는 몸짓 표에 있는 것만
+            # 할 수 있었고, 표에 없는 짓은 아무리 적어도 사라졌다.
+            # 이제 괄호째 남겨 화면에 내보낸다 — 상대가
+            # (다이아를 지긋이 바라본다) 라고 쓰는 것과 같은 자리다.
+            #
+            # 한 글자씩 넣는 것이 중요하다. 아래에서 표시가 있던 자리를
+            # len(out) 으로 재는데, 여기서 통째로 넣으면 칸 수가 어긋나
+            # **그 뒤의 표정과 몸짓이 전부 엉뚱한 자리에서 터진다.**
+            at = len(out)
+            out.extend(m.group(0))
             i = m.end()
-            while i < n and text[i] == " " and (not out or out[-1] == " "):
-                i += 1
+
+            # 적어 놓고 안 하면 안 적은 것보다 어색하다.
+            #
+            # (멋쩍은 듯 눈동자가 흔들리며) 라고 써 놓고 얼굴이 가만히
+            # 있으면, 글은 흔들린다는데 눈은 멀쩡하다. 그래서 문장을
+            # 읽어 얼굴과 몸으로 옮긴다. 못 읽는 문장이 훨씬 많고,
+            # 그때는 글자로만 나온다 — 지금까지와 같다.
+            act = AVATAR.act_reaction(inner)
+
+            if act:
+                if act.get("motion"):
+                    cue = {
+                        "at": at,
+                        "type": "motion",
+                        "key": act["motion"],
+                    }
+                    if act.get("expression"):
+                        cue["face"] = act["expression"]
+                    cues.append(cue)
+
+                elif act.get("expression"):
+                    e = AVATAR.expression(act["expression"])
+                    cues.append({
+                        "at": at,
+                        "type": "expression",
+                        "key": act["expression"],
+                        "hold_ms": e.hold_ms if e else 3000,
+                    })
+
             continue
 
         # 이모지 표정
