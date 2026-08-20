@@ -868,18 +868,27 @@ def process_chat(user_text, seeing=None, cut_off=False):
             motion=motion,
         )
 
-    except requests.exceptions.Timeout:
-        return done(_fallback(
-            stage,
-            "생각하는 데 시간이 조금 걸리고 있어요. 잠깐만요.",
-            "생각하는 데 시간이 좀 걸리네. 잠깐만.",
-        ))
-
-    except requests.exceptions.ConnectionError:
+    # 연결이 안 된 것을 먼저 잡는다.
+    #
+    # ConnectTimeout 은 ConnectionError 이면서 Timeout 이기도 하다.
+    # Timeout 절을 위에 두면 **닿지도 못한 것을 '생각이 오래 걸린다'**
+    # 고 답한다. 실제로 그것 때문에 원인을 한참 못 찾았다 —
+    # 올린 서버가 모델 서버에 아예 못 닿는데 화면에는 생각 중이라고
+    # 나왔다. 무엇이 잘못됐는지가 말에 드러나야 한다.
+    except requests.exceptions.ConnectionError as e:
+        print("[모델 서버에 못 닿음]:", e)
         return done(_fallback(
             stage,
             "지금 서버와 연결이 안 되는 것 같아요. 잠시 후에 다시 해볼까요?",
             "지금 서버랑 연결이 안 되는 것 같아. 잠깐 있다 다시 해보자.",
+        ))
+
+    except requests.exceptions.Timeout as e:
+        print("[모델이 제때 답을 못 줌]:", e)
+        return done(_fallback(
+            stage,
+            "생각하는 데 시간이 조금 걸리고 있어요. 잠깐만요.",
+            "생각하는 데 시간이 좀 걸리네. 잠깐만.",
         ))
 
     except Exception:

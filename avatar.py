@@ -2338,8 +2338,13 @@ DIA = VirtualAvatar(
         # 짐에도 안 넣는다. 밖에 올릴 때는 VRM_URL 로 다른 자리를
         # 가리킨다. 안 넣으면 지금까지처럼 static 에서 찾는다.
         "vrm": _env("VRM_URL", "/static/avatar.vrm"),
-        "vrm_body": _env("VRM_BODY_URL",
-                         "/static/%ED%91%9C%ED%98%84%EC%9A%A9.vrm"),
+        # 파일 이름은 영문이어야 한다.
+        #
+        # 원래 이름이 '표현용.vrm' 이었는데 **Vercel 에 올리면 짐에
+        # 안 실린다** — 아바타는 오는데 이 파일만 404 였다. 겹치기가
+        # 이걸 못 찾으면 옷 안이 텅 빈 채로 보인다.
+        # 그래서 body.vrm 으로 두고 쓴다(같은 파일이다).
+        "vrm_body": _env("VRM_BODY_URL", "/static/body.vrm"),
         # 몸/옷 겹치기.
         #
         # avatar.vrm 은 옷 아래 몸이 지워져 있어서, 옷을 잡아당기면

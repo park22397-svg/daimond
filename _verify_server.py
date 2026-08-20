@@ -81,6 +81,15 @@ with app.test_client() as c:
     ok(r.status_code == 200 and r.get_json()["user"] is None,
        "누구냐고 물으면 아무도 아니라고 한다")
 
+    # 아바타는 로그인 뒤에 있어야 한다.
+    #
+    # 파일 안에 Redistribution_Prohibited 가 박혀 있는데, /static/ 이
+    # 열려 있으면 주소만 알면 누구나 28MB 를 통째로 내려받는다.
+    # 로그인 화면은 static 이 필요 없으므로 막아도 아무것도 안 깨진다.
+    r = c.get("/static/avatar.vrm")
+    ok(r.status_code in (302, 401), "아바타를 로그인 없이 못 받는다",
+       r.status_code)
+
 
 print()
 print("회원가입")

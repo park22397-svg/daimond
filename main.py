@@ -131,7 +131,16 @@ def _bind_user():
     if user:
         return None
 
-    if path in OPEN_PATHS or path.startswith("/static/"):
+    # /static/ 도 막는다.
+    #
+    # 거기 있는 것은 아바타 파일과 배경뿐이다. 로그인 화면은 제 안에
+    # 글씨와 색을 다 갖고 있어서 static 이 필요 없다.
+    #
+    # 열어 두면 주소만 알면 누구나 아바타를 통째로 내려받는다.
+    # 파일 안에 Redistribution_Prohibited 가 박혀 있는 물건이다.
+    # 막아 두면 계정이 있는 사람만 받을 수 있고, 계정은 가입 암호를
+    # 아는 사람만 만든다.
+    if path in OPEN_PATHS:
         return None
 
     # API 는 화면을 돌려줄 데가 없으므로 숫자로 답한다.
