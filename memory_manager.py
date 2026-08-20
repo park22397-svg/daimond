@@ -23,7 +23,35 @@ import json
 import os
 import tempfile
 
+import who
 from config import MEMORY_FILE_PATH
+
+
+# ============================================================
+# 기억은 사람마다 따로 둔다
+#
+# 예전에는 memory_store.json 하나였다. 누가 들어오든 같은 기억을
+# 이어 써서, 내가 쌓은 친밀도를 남이 물려받고 내가 나눈 이야기를
+# 남이 읽었다.
+#
+# 이 파일의 함수 스무 개가 모두 이 아래 두 함수를 지나 파일에
+# 닿는다. 그래서 **여기만 사람마다 갈라 주면** 나머지는 한 줄도
+# 고칠 것이 없다. 누구인지는 who 가 안다.
+# ============================================================
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+MEMORY_DIR = os.path.join(HERE, "memory")
+
+
+def _memory_path(slot=None):
+    """지금 사람의 기억 파일 자리."""
+
+    slot = slot or who.current()
+
+    os.makedirs(MEMORY_DIR, exist_ok=True)
+
+    return os.path.join(MEMORY_DIR, str(slot) + ".json")
 
 
 # ============================================================
@@ -71,13 +99,15 @@ def load_memory_data():
     빈 기억 구조를 반환한다.
     """
 
-    if not os.path.exists(MEMORY_FILE_PATH):
+    path = _memory_path()
+
+    if not os.path.exists(path):
         return _create_default_memory()
 
     try:
 
         with open(
-            MEMORY_FILE_PATH,
+            path,
             "r",
             encoding="utf-8"
         ) as f:
@@ -232,8 +262,10 @@ def save_memory_data(data):
     기존 memory_store.json이 깨질 가능성을 줄일 수 있다.
     """
 
+    path = _memory_path()
+
     directory = os.path.dirname(
-        os.path.abspath(MEMORY_FILE_PATH)
+        os.path.abspath(path)
     )
 
     os.makedirs(
@@ -267,7 +299,7 @@ def save_memory_data(data):
 
         os.replace(
             temp_path,
-            MEMORY_FILE_PATH
+            path
         )
 
     except Exception:
@@ -642,9 +674,13 @@ def clear_all_memory():
 ARCHIVE_DIR = "memory_archive"
 
 
-def _archive_dir():
-    here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, ARCHIVE_DIR)
+def _archive_dir(slot=None):
+    """보관함도 사람마다 따로 둔다.
+
+    한 곳에 모아 두면 /리셋 이 남이 치워 둔 것을 꺼내 온다.
+    """
+    slot = slot or who.current()
+    path = os.path.join(HERE, ARCHIVE_DIR, str(slot))
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -839,3 +875,110 @@ def save_mood(raw, since):
     save_memory_data(data)
 
     return data["mood"]
+
+# ============================================================
+# 지금까지의 기억을 첫 계정에 물려준다
+#
+# 계정을 나누기 전까지 쌓은 것이 memory_store.json 하나에 있다.
+# 친밀도·순종·연인·아이까지 전부 거기 있다. 계정을 만들었다고
+# 그것이 손 닿지 않는 데로 밀려나면 다이아가 나를 처음 보게 된다.
+#
+# 그래서 **가장 먼저 만들어진 계정 하나가** 그 기억을 물려받는다.
+# 옮기는 것이지 복사가 아니다 — 남겨 두면 다음 계정이 또 물려받아
+# 같은 기억을 둘이 나눠 쓰게 된다.
+#
+# 회원가입 화면에 이 사실을 적어 둔다. 말없이 물려주면
+# 남의 기억을 받아 든 사람이 영문을 모른다.
+# ============================================================
+
+def legacy_exists():
+    """계정을 나누기 전의 기억이 아직 남아 있는가."""
+
+    return os.path.exists(MEMORY_FILE_PATH)
+
+
+def legacy_summary():
+    """물려줄 것이 무엇인지. 화면에 보여 주려고."""
+
+    if not legacy_exists():
+        return None
+
+    try:
+        with open(MEMORY_FILE_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    rel = data.get("relationship", {}) or {}
+
+    return {
+        "messages": len(data.get("conversation", []) or []),
+        "affinity": rel.get("affinity"),
+        "stage": rel.get("stage"),
+    }
+
+
+def inherit_legacy(slot):
+    """예전 기억을 이 자리로 옮긴다. 옮겼으면 True.
+
+    이미 그 자리에 기억이 있으면 건드리지 않는다 —
+    덮어쓰면 되돌릴 데가 없다.
+    """
+
+    if not legacy_exists():
+        return False
+
+    target = _memory_path(slot)
+
+    if os.path.exists(target):
+        return False
+
+    os.replace(MEMORY_FILE_PATH, target)
+
+    # 보관해 둔 것들도 같이 옮긴다.
+    # 기억만 옮기고 보관함을 두고 오면 /리셋 이 빈손으로 돌아온다.
+    old_dir = os.path.join(HERE, ARCHIVE_DIR)
+
+    if os.path.isdir(old_dir):
+        new_dir = _archive_dir(slot)
+
+        for name in os.listdir(old_dir):
+            if not (name.startswith("memory_") and name.endswith(".json")):
+                continue
+
+            src = os.path.join(old_dir, name)
+
+            if not os.path.isfile(src):
+                continue
+
+            dst = os.path.join(new_dir, name)
+
+            if not os.path.exists(dst):
+                os.replace(src, dst)
+
+    return True
+
+
+def start_fresh(slot):
+    """이 자리를 빈 기억으로 연다.
+
+    회원가입은 처음부터다 — 앞사람이 무엇을 했든 모르는 상태에서
+    시작한다. 이미 파일이 있으면 그대로 둔다(같은 아이디를 두 번
+    만들 수 없으므로 실제로는 없다).
+    """
+
+    path = _memory_path(slot)
+
+    if os.path.exists(path):
+        return False
+
+    os.makedirs(MEMORY_DIR, exist_ok=True)
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(_create_default_memory(), f, ensure_ascii=False, indent=2)
+
+    return True
+

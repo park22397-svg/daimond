@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>다이아 — 들어가기</title>
+<style>
+    * { box-sizing: border-box; }
+
+    body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0e1020;
+        color: #dfe1f0;
+        font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+        padding: 24px;
+    }
+
+    #box {
+        width: 100%;
+        max-width: 380px;
+    }
+
+    h1 {
+        margin: 0 0 4px;
+        font-size: 1.5rem;
+        letter-spacing: 0.04em;
+    }
+
+    #sub {
+        margin: 0 0 22px;
+        font-size: 0.84rem;
+        color: #8a8fb5;
+        line-height: 1.5;
+    }
+
+    /* 로그인 / 회원가입 고르기 */
+    #tabs {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 16px;
+    }
+
+    #tabs button {
+        flex: 1;
+        padding: 9px 0;
+        background: rgba(20, 22, 42, 0.72);
+        border: 1px solid #3a3f68;
+        color: #8a8fb5;
+        border-radius: 8px;
+        font-size: 0.88rem;
+        cursor: pointer;
+        font-family: inherit;
+    }
+
+    #tabs button.on {
+        background: #4a3f77;
+        border-color: #7a68b0;
+        color: #fff;
+    }
+
+    label {
+        display: block;
+        font-size: 0.78rem;
+        color: #8a8fb5;
+        margin: 0 0 5px;
+    }
+
+    input {
+        width: 100%;
+        padding: 10px 12px;
+        margin-bottom: 13px;
+        background: rgba(20, 22, 42, 0.72);
+        border: 1px solid #3a3f68;
+        border-radius: 8px;
+        color: #dfe1f0;
+        font-size: 0.95rem;
+        font-family: inherit;
+    }
+
+    input:focus {
+        outline: none;
+        border-color: #7a68b0;
+    }
+
+    #go {
+        width: 100%;
+        padding: 11px 0;
+        margin-top: 4px;
+        background: #4a3f77;
+        border: 1px solid #7a68b0;
+        border-radius: 8px;
+        color: #fff;
+        font-size: 0.95rem;
+        cursor: pointer;
+        font-family: inherit;
+    }
+
+    #go:hover { background: #5a4d8d; }
+    #go:disabled { opacity: 0.5; cursor: default; }
+
+    #msg {
+        margin-top: 13px;
+        font-size: 0.83rem;
+        line-height: 1.5;
+        min-height: 1.2em;
+    }
+
+    #msg.bad { color: #e08a9a; }
+    #msg.good { color: #8ad6a8; }
+
+    /* 첫 계정에게만 보이는 알림 */
+    #notice {
+        margin-bottom: 16px;
+        padding: 11px 13px;
+        background: rgba(74, 63, 119, 0.22);
+        border: 1px solid #4a3f77;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        line-height: 1.55;
+        color: #c3c6e0;
+    }
+
+    #notice b { color: #dfe1f0; }
+
+    .hide { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="box">
+
+    <h1>다이아</h1>
+    <p id="sub">
+        계정마다 기억이 따로입니다.<br>
+        새로 만들면 다이아는 당신을 처음 봅니다.
+    </p>
+
+    {% if first %}
+    <div id="notice">
+        아직 계정이 하나도 없습니다.
+        {% if legacy %}
+        <b>맨 처음 만드는 계정이</b> 계정을 나누기 전까지 쌓인 기억을
+        물려받습니다 — 대화 {{ legacy.messages }}개{% if legacy.affinity is not none %},
+        친밀도 {{ legacy.affinity }}{% endif %}.
+        다음 계정부터는 빈 기억으로 시작합니다.
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div id="tabs">
+        <button id="tab-in" class="on">로그인</button>
+        <button id="tab-up">회원가입</button>
+    </div>
+
+    <label for="f-id">아이디</label>
+    <input id="f-id" autocomplete="username" spellcheck="false"
+           placeholder="영문·숫자·밑줄 3~20자">
+
+    <label for="f-pw">비밀번호</label>
+    <input id="f-pw" type="password" autocomplete="current-password"
+           placeholder="4자 이상">
+
+    <div id="again-wrap" class="hide">
+        <label for="f-again">비밀번호 다시</label>
+        <input id="f-again" type="password" autocomplete="new-password">
+    </div>
+
+    <button id="go">들어가기</button>
+
+    <div id="msg"></div>
+
+</div>
+
+<script>
+    const tabIn = document.getElementById('tab-in');
+    const tabUp = document.getElementById('tab-up');
+    const fId = document.getElementById('f-id');
+    const fPw = document.getElementById('f-pw');
+    const fAgain = document.getElementById('f-again');
+    const againWrap = document.getElementById('again-wrap');
+    const go = document.getElementById('go');
+    const msg = document.getElementById('msg');
+
+    // 회원가입 칸인가
+    let signup = false;
+
+    function setMode(up) {
+        signup = up;
+
+        tabIn.classList.toggle('on', !up);
+        tabUp.classList.toggle('on', up);
+
+        againWrap.classList.toggle('hide', !up);
+
+        go.textContent = up ? '계정 만들기' : '들어가기';
+        fPw.autocomplete = up ? 'new-password' : 'current-password';
+
+        say('');
+    }
+
+    function say(text, good) {
+        msg.textContent = text || '';
+        msg.className = text ? (good ? 'good' : 'bad') : '';
+    }
+
+    tabIn.addEventListener('click', () => setMode(false));
+    tabUp.addEventListener('click', () => setMode(true));
+
+    // 아직 계정이 하나도 없으면 회원가입 칸으로 연다.
+    // 로그인할 것이 없는데 로그인 칸을 보여 주면 막힌 느낌이 든다.
+    if ({{ 'true' if first else 'false' }}) setMode(true);
+
+    async function submit() {
+        const id = fId.value.trim();
+        const pw = fPw.value;
+
+        if (!id || !pw) {
+            say('아이디와 비밀번호를 적어 주세요.');
+            return;
+        }
+
+        if (signup && pw !== fAgain.value) {
+            say('비밀번호가 서로 다릅니다.');
+            return;
+        }
+
+        go.disabled = true;
+        say('');
+
+        try {
+            const r = await fetch(signup ? '/api/signup' : '/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: id,
+                    password: pw,
+                    again: signup ? fAgain.value : undefined,
+                }),
+            }).then(r => r.json());
+
+            if (!r.ok) {
+                say(r.error || '들어가지 못했습니다.');
+                go.disabled = false;
+                return;
+            }
+
+            say(r.inherited
+                ? '그동안의 기억을 물려받았습니다. 들어갑니다…'
+                : '들어갑니다…', true);
+
+            location.href = '/';
+
+        } catch (e) {
+            say('서버에 닿지 못했습니다.');
+            go.disabled = false;
+        }
+    }
+
+    go.addEventListener('click', submit);
+
+    // 어느 칸에서든 엔터로 보낸다
+    [fId, fPw, fAgain].forEach(el => {
+        el.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+            }
+        });
+    });
+
+    fId.focus();
+</script>
+
+</body>
+</html>

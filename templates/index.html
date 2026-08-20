@@ -241,6 +241,41 @@
             background: rgba(132, 142, 220, 0.95);
         }
 
+        /* 누구로 들어와 있는지.
+           오른쪽 아래는 비어 있다 — 왼쪽 아래는 조이스틱(20~138px)과
+           앉기·점프(150px~)가 쓰고, 오른쪽 위는 사이 표가 쓴다. */
+        #who-badge {
+            position: absolute;
+            right: 14px;
+            bottom: 20px;
+            z-index: 13;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 6px 8px 6px 11px;
+            background: rgba(20, 22, 42, 0.72);
+            border: 1px solid #3a3f68;
+            border-radius: 999px;
+            color: #dfe1f0;
+            font-size: 0.8rem;
+            user-select: none;
+        }
+
+        #who-name { color: #b9bcd8; }
+
+        #who-out {
+            background: rgba(58, 63, 104, 0.5);
+            border: 1px solid #4a4f7a;
+            color: #dfe1f0;
+            padding: 3px 9px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        #who-out:hover { background: #5a4d8d; border-color: #7a68b0; }
+
         /* 앉기와 점프. 마우스만 쓸 때 Shift·스페이스를 대신한다 */
         #stick-keys {
             position: absolute;
@@ -776,6 +811,12 @@
             <video id="eye-video" autoplay playsinline muted></video>
         </div>
         <input type="file" id="eye-file" accept="image/*" style="display:none">
+
+        <!-- 누구로 들어와 있는가 -->
+        <div id="who-badge">
+            <span id="who-name">…</span>
+            <button id="who-out" title="나가기">나가기</button>
+        </div>
 
         <!-- 마우스로 걷기 -->
         <div id="stick-pad"><div id="stick-knob"></div></div>
@@ -8760,6 +8801,47 @@
             }
         );
 
+
+        // ============================================================
+        // 누구로 들어와 있는가
+        //
+        // 기억은 계정마다 따로다. 그래서 화면 어딘가에 지금 누구인지가
+        // 보여야 한다 — 남의 계정으로 들어와 있는 줄 모르고 이야기하면
+        // 그 기억이 남의 자리에 쌓인다.
+        // ============================================================
+
+        const whoName = document.getElementById('who-name');
+        const whoOut = document.getElementById('who-out');
+
+        async function refreshWho() {
+            try {
+                const r = await fetch('/api/whoami').then(r => r.json());
+
+                if (!r.user) {
+                    location.href = '/login';
+                    return;
+                }
+
+                whoName.textContent = r.user;
+
+            } catch (e) {
+                console.warn('[diamondAI] 누구인지 못 물어봄', e);
+            }
+        }
+
+        whoOut.addEventListener('click', async () => {
+            whoOut.disabled = true;
+
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (e) {
+                // 못 나가도 화면은 로그인으로 보낸다. 쿠키는 서버가 지운다.
+            }
+
+            location.href = '/login';
+        });
+
+        refreshWho();
 
         // ============================================================
         // 아바타 시작

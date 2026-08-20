@@ -2,13 +2,22 @@
 # main.py
 # diamondAI - Flask 서버 메인 실행 파일
 
+import os
+import secrets
+from datetime import timedelta
+
 from flask import (
     Flask,
     jsonify,
+    redirect,
     render_template,
-    request
+    request,
+    session
 )
 
+import accounts
+import memory_manager
+import who
 from ai_brain import extract_expression, process_chat
 from avatar import AVATAR
 from memory_manager import (
@@ -18,6 +27,225 @@ from memory_manager import (
 
 
 app = Flask(__name__)
+
+
+# ============================================================
+# 누구인가
+#
+# 계정을 나누기 전에는 기억 파일이 하나뿐이라 누가 들어오든
+# 같은 기억을 이어 썼다. 내가 쌓은 친밀도를 남이 물려받고
+# 내가 나눈 이야기를 남이 읽었다.
+#
+# 여기서 하는 일은 두 가지뿐이다.
+#   1. 쿠키에 적힌 아이디를 읽어 who 에 적는다
+#   2. 로그인하지 않았으면 들여보내지 않는다
+#
+# 기억을 실제로 가르는 것은 memory_manager 쪽이다. 이 파일은
+# '누구인지' 만 알려 준다.
+# ============================================================
+
+# 쿠키에 서명할 열쇠.
+#
+# 매번 새로 만들면 서버를 다시 켤 때마다 모두 로그아웃된다.
+# 그래서 한 번 만들어 파일에 두고 다음부터는 그것을 읽는다.
+# 이 파일이 새면 남의 쿠키를 지어낼 수 있으므로 저장소에 올리지 않는다.
+def _secret_key():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".secret_key")
+
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                key = f.read().strip()
+            if len(key) >= 32:
+                return key
+        except OSError:
+            pass
+
+    key = secrets.token_hex(32)
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(key)
+    except OSError as e:
+        print("[열쇠 저장 실패]:", e)
+
+    return key
+
+
+app.secret_key = _secret_key()
+
+# 로그인한 채로 두는 기간. 창을 닫아도 유지된다.
+app.permanent_session_lifetime = timedelta(days=30)
+
+
+# 로그인 없이 지나갈 수 있는 자리.
+#
+# 로그인 화면 자체와, 로그인하려고 부르는 것들.
+# 여기 빠진 것은 전부 막힌다 — 새 API 를 만들 때 따로 챙길 일이 없다.
+OPEN_PATHS = {
+    "/login",
+    "/api/login",
+    "/api/signup",
+    "/api/whoami",
+}
+
+
+def current_user():
+    """지금 들어와 있는 사람의 아이디. 없으면 None."""
+
+    return session.get("user")
+
+
+@app.before_request
+def _bind_user():
+    """요청마다 '지금 누구인가' 를 정한다.
+
+    **반드시 요청마다** — 스레드는 다시 쓰이므로, 안 정하면
+    앞사람의 자리가 그대로 남아 남의 기억을 쓰게 된다.
+    """
+
+    path = request.path or "/"
+
+    user = session.get("user")
+    slot = session.get("slot")
+
+    # 쿠키는 남았는데 계정이 사라진 경우(파일을 지웠다든지).
+    # 없는 사람의 기억을 열지 않도록 여기서 끊는다.
+    if user and accounts.slot_of(user) != slot:
+        session.clear()
+        user = None
+        slot = None
+
+    who.set_current(slot)
+
+    if user:
+        return None
+
+    if path in OPEN_PATHS or path.startswith("/static/"):
+        return None
+
+    # API 는 화면을 돌려줄 데가 없으므로 숫자로 답한다.
+    if path.startswith("/api/"):
+        return jsonify({"ok": False, "error": "로그인이 필요합니다."}), 401
+
+    return redirect("/login")
+
+
+# ============================================================
+# 로그인 화면
+# ============================================================
+
+@app.route("/login")
+def login_page():
+    if current_user():
+        return redirect("/")
+
+    return render_template(
+        "login.html",
+        first=(accounts.count() == 0),
+        legacy=memory_manager.legacy_summary(),
+    )
+
+
+@app.route("/api/whoami")
+def whoami_api():
+    """지금 누구로 들어와 있는가. 화면이 물어본다."""
+
+    user = current_user()
+
+    if not user:
+        return jsonify({"ok": True, "user": None})
+
+    return jsonify({
+        "ok": True,
+        "user": accounts.display_name(user),
+        "slot": session.get("slot"),
+    })
+
+
+@app.route("/api/signup", methods=["POST"])
+def signup_api():
+    """계정을 만든다.
+
+    새 계정은 **빈 기억**으로 시작한다. 앞사람이 무엇을 했든
+    모르는 상태에서 만난다 — 이것이 계정을 나눈 이유다.
+    다만 맨 처음 만드는 계정 하나는 계정을 나누기 전에 쌓인
+    기억을 물려받는다. 그러지 않으면 그동안의 관계가 손 닿지
+    않는 데로 밀려난다.
+    """
+
+    data = request.get_json(silent=True) or {}
+
+    user_id = str(data.get("id") or "").strip()
+    password = str(data.get("password") or "")
+    again = str(data.get("again") or "")
+
+    if again and again != password:
+        return jsonify({"ok": False, "error": "비밀번호가 서로 다릅니다."})
+
+    first = accounts.count() == 0
+
+    ok, msg, slot = accounts.create(user_id, password)
+
+    if not ok:
+        return jsonify({"ok": False, "error": msg})
+
+    inherited = False
+
+    if first:
+        inherited = memory_manager.inherit_legacy(slot)
+
+    if not inherited:
+        memory_manager.start_fresh(slot)
+
+    session.permanent = True
+    session["user"] = user_id
+    session["slot"] = slot
+    who.set_current(slot)
+
+    accounts.touch_login(user_id)
+
+    return jsonify({
+        "ok": True,
+        "user": accounts.display_name(user_id),
+        "inherited": inherited,
+    })
+
+
+@app.route("/api/login", methods=["POST"])
+def login_api():
+    """들어온다. 그 사람이 쌓아 둔 기억이 그대로 열린다."""
+
+    data = request.get_json(silent=True) or {}
+
+    user_id = str(data.get("id") or "").strip()
+    password = str(data.get("password") or "")
+
+    slot = accounts.verify(user_id, password)
+
+    # 아이디가 틀렸는지 비밀번호가 틀렸는지 알려 주지 않는다.
+    # 알려 주면 어느 아이디가 있는지를 하나씩 확인할 수 있다.
+    if slot is None:
+        return jsonify({"ok": False, "error": "아이디나 비밀번호가 맞지 않습니다."})
+
+    session.permanent = True
+    session["user"] = user_id
+    session["slot"] = slot
+    who.set_current(slot)
+
+    accounts.touch_login(user_id)
+
+    return jsonify({"ok": True, "user": accounts.display_name(user_id)})
+
+
+@app.route("/api/logout", methods=["POST"])
+def logout_api():
+    """나간다. 기억은 그대로 남는다 — 다음에 들어오면 이어진다."""
+
+    session.clear()
+    who.clear()
+
+    return jsonify({"ok": True})
 
 
 # ============================================================
