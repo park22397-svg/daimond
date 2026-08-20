@@ -6,6 +6,7 @@ import re
 import requests
 
 from avatar import AVATAR, is_emoji
+import config
 from config import (
     MAX_HISTORY_MESSAGES,
     OLLAMA_MODEL,
@@ -799,13 +800,13 @@ def process_chat(user_text, seeing=None, cut_off=False):
         payload["think"] = OLLAMA_THINK
 
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=60)
+        response = requests.post(config.ollama_url(), json=payload, timeout=60)
 
         # 서버가 이 항목을 모르는 판이면 빼고 한 번만 다시 보낸다.
         if response.status_code == 400 and "think" in payload:
             print("[알림] 서버가 think 항목을 받지 않아 빼고 다시 보냅니다.")
             payload.pop("think")
-            response = requests.post(OLLAMA_URL, json=payload, timeout=60)
+            response = requests.post(config.ollama_url(), json=payload, timeout=60)
 
         if response.status_code != 200:
             return done(_fallback(
@@ -1005,10 +1006,10 @@ def keep_talking():
         payload["think"] = OLLAMA_THINK
 
     try:
-        res = requests.post(OLLAMA_URL, json=payload, timeout=60)
+        res = requests.post(config.ollama_url(), json=payload, timeout=60)
         if res.status_code == 400 and "think" in payload:
             payload.pop("think")
-            res = requests.post(OLLAMA_URL, json=payload, timeout=60)
+            res = requests.post(config.ollama_url(), json=payload, timeout=60)
         if res.status_code != 200:
             return None
 

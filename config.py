@@ -1,6 +1,62 @@
 # config.py - Ollama 모델명 업데이트
 
-OLLAMA_URL = "http://cju.nezip.co.kr:11434/api/chat"
+import os
+
+# 모델 서버가 어디 있는가.
+#
+# 내 컴퓨터에서는 그 주소로 바로 닿는다(40ms). 그런데 **올린 데서는
+# 못 닿는다** — Vercel 미국도 서울도 연결 자체가 안 됐다. 바깥으로
+# 나가는 것은 되므로(목소리는 1.3초로 온다) 그 서버·그 포트만 막힌
+# 것이다.
+#
+# 그래서 올린 데서는 터널 주소를 넣는다. 내 컴퓨터에서 cloudflared 가
+# 그 서버로 이어 주고, 터널은 https(443)로 나가므로 막히지 않는다.
+#
+#   _tools/cloudflared.exe tunnel --url http://cju.nezip.co.kr:11434
+#
+# 터널 주소는 띄울 때마다 바뀐다. 바뀌면 Vercel 의 OLLAMA_URL 도
+# 같이 바꿔야 한다.
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "").strip()     or "http://cju.nezip.co.kr:11434/api/chat"
+
+
+# 터널 주소는 띄울 때마다 바뀐다.
+#
+# 환경변수에만 두면 바뀔 때마다 값을 고치고 **다시 배포해야** 한다.
+# 그러면 못 쓴다 — 컴퓨터를 켤 때마다 배포할 수는 없다.
+#
+# 그래서 저장소에 적어 두고 부를 때마다 읽는다. 터널을 새로 띄우면
+# _tunnel.py 가 이 값만 바꾸고, 올린 데는 다음 대화부터 그리로 간다.
+#
+# 매번 읽으면 대화마다 한 번씩 더 오가므로 잠깐 담아 둔다.
+RUNTIME_KEY = "runtime.json"
+RUNTIME_CACHE_SEC = 45
+
+_runtime = {"at": 0.0, "url": None}
+
+
+def ollama_url():
+    """지금 모델 서버가 어디인가.
+
+    저장소에 적힌 것이 있으면 그것, 없으면 환경변수나 정해 둔 값.
+    """
+    import time
+
+    now = time.time()
+
+    if now - _runtime["at"] < RUNTIME_CACHE_SEC:
+        return _runtime["url"] or OLLAMA_URL
+
+    _runtime["at"] = now
+
+    try:
+        import store
+        got = (store.read_json(RUNTIME_KEY) or {}).get("ollama_url")
+        _runtime["url"] = str(got).strip() if got else None
+    except Exception as e:
+        print("[모델 주소 읽기 실패]", e)
+        _runtime["url"] = None
+
+    return _runtime["url"] or OLLAMA_URL
 
 # 모델 비교 결과 gemma4:31b 로 교체 (2026-08-13)
 #

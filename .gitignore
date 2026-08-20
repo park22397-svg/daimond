@@ -54,3 +54,6 @@ accounts.json
 memory/
 .vercel
 .env*
+
+# 터널 실행 파일(cloudflared). 받아 쓰는 것이라 저장소에 둘 이유가 없다.
+_tools/
