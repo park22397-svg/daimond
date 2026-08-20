@@ -8960,8 +8960,14 @@
         // 아바타 시작
         // ============================================================
 
+        // 어디서 불러올지는 개체가 정한다.
+        //
+        // 아바타 파일은 라이선스가 Redistribution_Prohibited 라 공개된
+        // 데에 올릴 수 없다. 그래서 밖에 올릴 때는 VRM_URL 로 다른
+        // 자리를 가리킨다. 여기에 주소를 박아 두면 그것을 못 한다.
         loadAvatar(
-            '/static/avatar.vrm'
+            (ENTITY && ENTITY.model && ENTITY.model.vrm)
+            || '/static/avatar.vrm'
         );
 
     </script>

@@ -1,0 +1,55 @@
+# 올리는 짐에서 뺄 것
+#
+# .gitignore 와 겹치는 것이 많지만 따로 있어야 한다.
+# Vercel 은 저장소가 아니라 이 폴더를 통째로 올리므로,
+# .gitignore 로 뺀 것도 여기에 없으면 같이 올라간다.
+
+# 아바타.
+#
+# 파일 안에 Redistribution_Prohibited 가 박혀 있다. 공개된 주소에
+# 두는 것이 곧 재배포다. 밖에서는 VRM_URL 로 다른 자리를 가리킨다.
+static/*.vrm
+static/skin/
+
+# 배경 이미지. 남이 만든 것을 다시 뿌릴 권리가 없다.
+static/background/*
+!static/background/읽어주세요.txt
+
+# 다이아와 나눈 이야기. 올릴 것이 아니다.
+memory/
+memory_archive/
+memory_store.json
+accounts.json
+.secret_key
+_cue_log.txt
+
+# 재고 고치는 데 쓰는 것들. 서버가 안 쓴다.
+_verify_*.py
+_bench_*.py
+_fit_*.py
+_gen_*.py
+_inspect_*.py
+_diagnose.py
+_patch_index.py
+_body_shape.py
+_skin_check.py
+_backup_*/
+_expressions_locked.json
+
+# 짐만 키우는 것
+.git/
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+README.md
+
+# 손보기 전에 떠 둔 것들. 짐의 대부분이 이것이었다(7.5MB 중 6MB).
+*.bak_*
+*.bak
+
+# 저장소 토큰. Vercel 이 환경변수로 따로 넣어 주므로 짐에 실을 이유가 없다.
+# 실으면 토큰이 배포된 파일 안에 그대로 들어간다.
+.env
+.env.*
+.vercel/

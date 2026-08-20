@@ -52,3 +52,5 @@ accounts.json
 
 # 사람마다 갈라 둔 기억. memory_store.json 과 같은 이유로 올리지 않는다.
 memory/
+.vercel
+.env*

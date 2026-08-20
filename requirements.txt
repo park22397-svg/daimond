@@ -1,0 +1,7 @@
+flask>=3.0
+requests>=2.31
+edge-tts>=6.1
+
+# 올린 데서 계정과 기억을 적어 둘 곳(Vercel Blob).
+# 내 컴퓨터에서는 안 쓴다 — store.py 가 파일로 간다.
+vercel>=0.10

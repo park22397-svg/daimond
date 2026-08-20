@@ -21,8 +21,8 @@
 
 import json
 import os
-import tempfile
 
+import store
 import who
 from config import MEMORY_FILE_PATH
 
@@ -41,17 +41,22 @@ from config import MEMORY_FILE_PATH
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-MEMORY_DIR = os.path.join(HERE, "memory")
+# 기억이 적히는 자리.
+#
+# 파일 이름이 아니라 '열쇠' 다. 내 컴퓨터에서는 이 이름의 파일이 되고,
+# 올렸을 때는 저장소의 같은 이름이 된다.
+#
+# 올린 데서는 파일을 쓸 수가 없다. 그래서 적고 읽는 일은 전부 store 에
+# 맡기고, 여기는 '누구의 것인가' 만 정한다.
+MEMORY_DIR = "memory"
 
 
-def _memory_path(slot=None):
-    """지금 사람의 기억 파일 자리."""
+def _memory_key(slot=None):
+    """지금 사람의 기억이 적히는 열쇠."""
 
     slot = slot or who.current()
 
-    os.makedirs(MEMORY_DIR, exist_ok=True)
-
-    return os.path.join(MEMORY_DIR, str(slot) + ".json")
+    return MEMORY_DIR + "/" + str(slot) + ".json"
 
 
 # ============================================================
@@ -99,32 +104,9 @@ def load_memory_data():
     빈 기억 구조를 반환한다.
     """
 
-    path = _memory_path()
+    data = store.read_json(_memory_key())
 
-    if not os.path.exists(path):
-        return _create_default_memory()
-
-    try:
-
-        with open(
-            path,
-            "r",
-            encoding="utf-8"
-        ) as f:
-
-            data = json.load(f)
-
-    except (
-        json.JSONDecodeError,
-        OSError,
-        TypeError,
-        ValueError
-    ) as e:
-
-        print(
-            f"[기억 파일 읽기 오류]: {e}"
-        )
-
+    if data is None:
         return _create_default_memory()
 
     # --------------------------------------------------------
@@ -262,54 +244,7 @@ def save_memory_data(data):
     기존 memory_store.json이 깨질 가능성을 줄일 수 있다.
     """
 
-    path = _memory_path()
-
-    directory = os.path.dirname(
-        os.path.abspath(path)
-    )
-
-    os.makedirs(
-        directory,
-        exist_ok=True
-    )
-
-    fd, temp_path = tempfile.mkstemp(
-        prefix="memory_",
-        suffix=".tmp",
-        dir=directory
-    )
-
-    try:
-
-        with os.fdopen(
-            fd,
-            "w",
-            encoding="utf-8"
-        ) as f:
-
-            json.dump(
-                data,
-                f,
-                ensure_ascii=False,
-                indent=2
-            )
-
-            f.flush()
-            os.fsync(f.fileno())
-
-        os.replace(
-            temp_path,
-            path
-        )
-
-    except Exception:
-
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
-
-        raise
+    store.write_json(_memory_key(), data)
 
 
 # ============================================================
@@ -680,20 +615,17 @@ def _archive_dir(slot=None):
     한 곳에 모아 두면 /리셋 이 남이 치워 둔 것을 꺼내 온다.
     """
     slot = slot or who.current()
-    path = os.path.join(HERE, ARCHIVE_DIR, str(slot))
-    os.makedirs(path, exist_ok=True)
-    return path
+    return ARCHIVE_DIR + "/" + str(slot)
 
 
 def _archive_files():
-    """보관해 둔 것들. 최근 것이 앞에 온다."""
-    path = _archive_dir()
-    names = [
-        n for n in os.listdir(path)
-        if n.startswith("memory_") and n.endswith(".json")
+    """보관해 둔 것들의 열쇠. 최근 것이 앞에 온다."""
+    keys = [
+        k for k in store.listing(_archive_dir())
+        if k.rsplit("/", 1)[-1].startswith("memory_") and k.endswith(".json")
     ]
-    names.sort(reverse=True)
-    return [os.path.join(path, n) for n in names]
+    keys.sort(reverse=True)
+    return keys
 
 
 def archive_memory(stamp=None):
@@ -708,10 +640,8 @@ def archive_memory(stamp=None):
 
     stamp = stamp or datetime.now().strftime("%Y%m%d_%H%M%S")
     name = f"memory_{stamp}.json"
-    path = os.path.join(_archive_dir(), name)
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    store.write_json(_archive_dir() + "/" + name, data)
 
     save_memory_data(_create_default_memory())
 
@@ -730,56 +660,53 @@ def restore_memory(name=None):
     files = _archive_files()
 
     if name:
-        path = os.path.join(_archive_dir(), name)
-        if not os.path.exists(path):
+        key = _archive_dir() + "/" + name
+        if not store.exists(key):
             return None
     else:
         if not files:
             return None
-        path = files[0]
+        key = files[0]
 
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        print(f"[기억 꺼내기 오류]: {e}")
+    data = store.read_json(key)
+
+    if data is None:
+        print("[기억 꺼내기 오류]: " + key)
         return None
 
     # 지금 것을 먼저 치워 둔다
     from datetime import datetime
     now = load_memory_data()
     if now.get("conversation"):
-        keep = os.path.join(
-            _archive_dir(),
-            "memory_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_before_restore.json"
-        )
+        keep = (_archive_dir() + "/memory_"
+                + datetime.now().strftime("%Y%m%d_%H%M%S")
+                + "_before_restore.json")
         try:
-            with open(keep, "w", encoding="utf-8") as f:
-                json.dump(now, f, ensure_ascii=False, indent=2)
+            store.write_json(keep, now)
         except Exception as e:
             print(f"[꺼내기 전 보관 오류]: {e}")
 
     save_memory_data(data)
 
-    return os.path.basename(path), len(data.get("conversation", []))
+    return key.rsplit("/", 1)[-1], len(data.get("conversation", []))
 
 
 def list_archives():
     """보관해 둔 것들의 요약."""
     out = []
-    for p in _archive_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                d = json.load(f)
-            rel = d.get("relationship", {}) or {}
-            out.append({
-                "name": os.path.basename(p),
-                "messages": len(d.get("conversation", [])),
-                "affinity": rel.get("affinity"),
-                "stage": rel.get("stage"),
-            })
-        except Exception:
-            out.append({"name": os.path.basename(p), "messages": None})
+    for key in _archive_files():
+        name = key.rsplit("/", 1)[-1]
+        d = store.read_json(key)
+        if not isinstance(d, dict):
+            out.append({"name": name, "messages": None})
+            continue
+        rel = d.get("relationship", {}) or {}
+        out.append({
+            "name": name,
+            "messages": len(d.get("conversation", [])),
+            "affinity": rel.get("affinity"),
+            "stage": rel.get("stage"),
+        })
     return out
 
 
@@ -891,23 +818,21 @@ def save_mood(raw, since):
 # 남의 기억을 받아 든 사람이 영문을 모른다.
 # ============================================================
 
+# 계정을 나누기 전의 기억은 늘 파일이었다. 그것을 물려주는 일은
+# 내 컴퓨터에서만 일어난다 — 올린 데에는 옛 파일이 없다.
+LEGACY_KEY = os.path.basename(MEMORY_FILE_PATH)
+
+
 def legacy_exists():
     """계정을 나누기 전의 기억이 아직 남아 있는가."""
 
-    return os.path.exists(MEMORY_FILE_PATH)
+    return store.exists(LEGACY_KEY)
 
 
 def legacy_summary():
     """물려줄 것이 무엇인지. 화면에 보여 주려고."""
 
-    if not legacy_exists():
-        return None
-
-    try:
-        with open(MEMORY_FILE_PATH, encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return None
+    data = store.read_json(LEGACY_KEY)
 
     if not isinstance(data, dict):
         return None
@@ -928,36 +853,18 @@ def inherit_legacy(slot):
     덮어쓰면 되돌릴 데가 없다.
     """
 
-    if not legacy_exists():
+    if not store.move(LEGACY_KEY, _memory_key(slot)):
         return False
-
-    target = _memory_path(slot)
-
-    if os.path.exists(target):
-        return False
-
-    os.replace(MEMORY_FILE_PATH, target)
 
     # 보관해 둔 것들도 같이 옮긴다.
     # 기억만 옮기고 보관함을 두고 오면 /리셋 이 빈손으로 돌아온다.
-    old_dir = os.path.join(HERE, ARCHIVE_DIR)
+    for key in store.listing(ARCHIVE_DIR):
+        name = key.rsplit("/", 1)[-1]
 
-    if os.path.isdir(old_dir):
-        new_dir = _archive_dir(slot)
+        if not (name.startswith("memory_") and name.endswith(".json")):
+            continue
 
-        for name in os.listdir(old_dir):
-            if not (name.startswith("memory_") and name.endswith(".json")):
-                continue
-
-            src = os.path.join(old_dir, name)
-
-            if not os.path.isfile(src):
-                continue
-
-            dst = os.path.join(new_dir, name)
-
-            if not os.path.exists(dst):
-                os.replace(src, dst)
+        store.move(key, _archive_dir(slot) + "/" + name)
 
     return True
 
@@ -970,15 +877,12 @@ def start_fresh(slot):
     만들 수 없으므로 실제로는 없다).
     """
 
-    path = _memory_path(slot)
+    key = _memory_key(slot)
 
-    if os.path.exists(path):
+    if store.exists(key):
         return False
 
-    os.makedirs(MEMORY_DIR, exist_ok=True)
-
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(_create_default_memory(), f, ensure_ascii=False, indent=2)
+    store.write_json(key, _create_default_memory())
 
     return True
 

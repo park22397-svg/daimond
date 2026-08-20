@@ -50,6 +50,13 @@ app = Flask(__name__)
 # 그래서 한 번 만들어 파일에 두고 다음부터는 그것을 읽는다.
 # 이 파일이 새면 남의 쿠키를 지어낼 수 있으므로 저장소에 올리지 않는다.
 def _secret_key():
+    # 올린 데서는 파일이 안 남는다. 기계가 바뀔 때마다 열쇠가 새로 생기면
+    # 그때마다 모두 로그아웃된다. 그래서 환경변수를 먼저 본다.
+    env = os.environ.get("SECRET_KEY", "").strip()
+
+    if len(env) >= 32:
+        return env
+
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".secret_key")
 
     if os.path.exists(path):
@@ -67,7 +74,10 @@ def _secret_key():
         with open(path, "w", encoding="utf-8") as f:
             f.write(key)
     except OSError as e:
+        # 읽기 전용인 데서는 못 쓴다. 그래도 이번 판은 돌아간다 —
+        # 다만 기계가 바뀌면 로그인이 풀리므로 SECRET_KEY 를 넣어야 한다.
         print("[열쇠 저장 실패]:", e)
+        print("[알림] SECRET_KEY 환경변수를 넣으면 로그인이 유지됩니다.")
 
     return key
 
@@ -144,6 +154,7 @@ def login_page():
         "login.html",
         first=(accounts.count() == 0),
         legacy=memory_manager.legacy_summary(),
+        need_code=bool(os.environ.get("SIGNUP_CODE", "").strip()),
     )
 
 
@@ -182,6 +193,16 @@ def signup_api():
 
     if again and again != password:
         return jsonify({"ok": False, "error": "비밀번호가 서로 다릅니다."})
+
+    # 아무나 들어오지 못하게.
+    #
+    # 내 컴퓨터에서만 돌 때는 필요 없었다. 밖에 올리면 주소를 아는
+    # 사람은 누구나 계정을 만들 수 있으므로, SIGNUP_CODE 를 넣어 두면
+    # 그것을 아는 사람만 만들 수 있다. 안 넣으면 지금까지와 같다.
+    need = os.environ.get("SIGNUP_CODE", "").strip()
+
+    if need and str(data.get("code") or "").strip() != need:
+        return jsonify({"ok": False, "error": "가입 암호가 맞지 않습니다."})
 
     first = accounts.count() == 0
 

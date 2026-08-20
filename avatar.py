@@ -17,6 +17,7 @@
 # 페르소나는 아바타의 속성이며, 아바타 없이 따로 존재하지 않는다.
 
 
+import os
 import random
 import re
 
@@ -453,6 +454,14 @@ class TouchTool:
 # ============================================================
 # 버츄얼 아바타 = 몸(VRM) + 표정 + 동작 + 관계 + 페르소나
 # ============================================================
+
+def _env(name, fallback):
+    """환경변수가 있으면 그것을, 없으면 정해 둔 값을.
+
+    올린 데와 내 컴퓨터가 서로 다른 자리를 가리켜야 할 때 쓴다.
+    """
+    return os.environ.get(name, "").strip() or fallback
+
 
 class VirtualAvatar:
 
@@ -2322,8 +2331,15 @@ DIA = VirtualAvatar(
     # 옷 입은 모델은 옷 아래 몸이 지워져 있어(7949 vs 10934 삼각형)
     # 옷을 당기면 구멍이 보인다. 그래서 몸을 따로 깐다.
     model={
-        "vrm": "/static/avatar.vrm",
-        "vrm_body": "/static/%ED%91%9C%ED%98%84%EC%9A%A9.vrm",
+        # 아바타 파일이 어디 있는가.
+        #
+        # 파일 안에 라이선스가 Redistribution_Prohibited 로 박혀 있어
+        # 공개된 데에 두는 것이 곧 재배포다. 그래서 저장소에도, 올리는
+        # 짐에도 안 넣는다. 밖에 올릴 때는 VRM_URL 로 다른 자리를
+        # 가리킨다. 안 넣으면 지금까지처럼 static 에서 찾는다.
+        "vrm": _env("VRM_URL", "/static/avatar.vrm"),
+        "vrm_body": _env("VRM_BODY_URL",
+                         "/static/%ED%91%9C%ED%98%84%EC%9A%A9.vrm"),
         # 몸/옷 겹치기.
         #
         # avatar.vrm 은 옷 아래 몸이 지워져 있어서, 옷을 잡아당기면

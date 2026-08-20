@@ -20,17 +20,21 @@
 
 import hashlib
 import hmac
-import json
 import os
 import re
 import secrets
-import tempfile
 import time
+
+import store
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-ACCOUNTS_FILE = os.path.join(HERE, "accounts.json")
+# 계정이 적히는 자리.
+#
+# 파일 이름이 아니라 '열쇠' 다. 내 컴퓨터에서는 이 이름의 파일이 되고,
+# 올렸을 때는 저장소의 같은 이름이 된다. 어디에 적을지는 store 가 안다.
+ACCOUNTS_KEY = "accounts.json"
 
 # 늘리면 맞혀 보기가 느려지고 로그인도 같이 느려진다.
 # 20만 번이면 이 컴퓨터에서 0.1초쯤이다 — 사람은 못 느끼고
@@ -56,17 +60,9 @@ def _blank():
 
 
 def load():
-    """계정 전부. 파일이 없거나 깨졌으면 빈 것."""
+    """계정 전부. 없거나 깨졌으면 빈 것."""
 
-    if not os.path.exists(ACCOUNTS_FILE):
-        return _blank()
-
-    try:
-        with open(ACCOUNTS_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError, ValueError) as e:
-        print(f"[계정 파일 읽기 오류]: {e}")
-        return _blank()
+    data = store.read_json(ACCOUNTS_KEY)
 
     if not isinstance(data, dict):
         return _blank()
@@ -80,27 +76,9 @@ def load():
 
 
 def save(data):
-    """임시 파일에 먼저 쓰고 바꿔 끼운다.
+    """계정을 적어 둔다. 깨지지 않게 넣는 것은 store 가 맡는다."""
 
-    쓰는 도중에 꺼져도 있던 계정이 날아가지 않게. 기억 파일과 같은 방식이다.
-    """
-
-    fd, tmp = tempfile.mkstemp(prefix="accounts_", suffix=".tmp", dir=HERE)
-
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-
-        os.replace(tmp, ACCOUNTS_FILE)
-
-    except Exception:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+    store.write_json(ACCOUNTS_KEY, data)
 
 
 # ============================================================

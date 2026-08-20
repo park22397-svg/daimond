@@ -167,6 +167,12 @@
     <div id="again-wrap" class="hide">
         <label for="f-again">비밀번호 다시</label>
         <input id="f-again" type="password" autocomplete="new-password">
+
+        {% if need_code %}
+        <label for="f-code">가입 암호</label>
+        <input id="f-code" type="password" autocomplete="off"
+               placeholder="아는 사람만 계정을 만들 수 있습니다">
+        {% endif %}
     </div>
 
     <button id="go">들어가기</button>
@@ -181,6 +187,9 @@
     const fId = document.getElementById('f-id');
     const fPw = document.getElementById('f-pw');
     const fAgain = document.getElementById('f-again');
+
+    // 가입 암호 칸은 SIGNUP_CODE 를 넣어 둔 데서만 생긴다
+    const fCode = document.getElementById('f-code');
     const againWrap = document.getElementById('again-wrap');
     const go = document.getElementById('go');
     const msg = document.getElementById('msg');
@@ -239,6 +248,7 @@
                     id: id,
                     password: pw,
                     again: signup ? fAgain.value : undefined,
+                    code: fCode ? fCode.value : undefined,
                 }),
             }).then(r => r.json());
 
@@ -263,7 +273,7 @@
     go.addEventListener('click', submit);
 
     // 어느 칸에서든 엔터로 보낸다
-    [fId, fPw, fAgain].forEach(el => {
+    [fId, fPw, fAgain, fCode].filter(Boolean).forEach(el => {
         el.addEventListener('keydown', e => {
             if (e.key === 'Enter') {
                 e.preventDefault();

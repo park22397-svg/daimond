@@ -23,14 +23,15 @@ sys.path.insert(0, HERE)
 # 진짜 파일을 안 건드리도록 먼저 자리를 옮긴다.
 SANDBOX = tempfile.mkdtemp(prefix="dia_login_")
 
+import store
+
+# 적고 읽는 일이 전부 store 를 지나가므로, 여기 한 곳만 옮기면
+# 진짜 계정과 진짜 기억은 건드리지 않는다.
+store.HERE = SANDBOX
+
 import accounts
 import memory_manager
 import who
-
-accounts.ACCOUNTS_FILE = os.path.join(SANDBOX, "accounts.json")
-memory_manager.MEMORY_DIR = os.path.join(SANDBOX, "memory")
-memory_manager.HERE = SANDBOX
-memory_manager.MEMORY_FILE_PATH = os.path.join(SANDBOX, "memory_store.json")
 
 # 맞혀 보기를 느리게 하는 반복 횟수를 검사에서는 줄인다.
 # 검사가 오래 걸리면 안 돌리게 된다.
@@ -70,7 +71,7 @@ ok(accounts.verify("alice", "pw1235") is None, "틀린 비밀번호로 못 들�
 ok(accounts.verify("nobody", "pw1234") is None, "없는 아이디로 못 들어간다")
 ok(accounts.verify("ALICE", "pw1234") == slot_a, "아이디 대소문자를 가리지 않는다")
 
-raw = open(accounts.ACCOUNTS_FILE, encoding="utf-8").read()
+raw = open(os.path.join(SANDBOX, "accounts.json"), encoding="utf-8").read()
 ok("pw1234" not in raw, "비밀번호가 파일에 그대로 적히지 않는다")
 
 rec = json.loads(raw)["users"]["alice"]
@@ -102,7 +103,7 @@ ok(len(alice_conv) == 1 and alice_conv[0]["content"] == "앨리스가 한 말",
 ok(memory_manager.load_relationship().get("affinity") == 77,
    "다시 들어오면 내 친밀도가 그대로 있다")
 
-files = sorted(os.listdir(memory_manager.MEMORY_DIR))
+files = sorted(os.listdir(os.path.join(SANDBOX, "memory")))
 ok(len(files) == 2, "기억 파일이 사람 수만큼 있다", str(files))
 
 
@@ -136,10 +137,11 @@ ok(all("손님" not in m["content"] for m in memory_manager.load_memory()),
 print()
 print("예전 기억 물려주기")
 
-shutil.rmtree(memory_manager.MEMORY_DIR, ignore_errors=True)
-os.remove(accounts.ACCOUNTS_FILE)
+shutil.rmtree(os.path.join(SANDBOX, "memory"), ignore_errors=True)
+os.remove(os.path.join(SANDBOX, "accounts.json"))
 
-with open(memory_manager.MEMORY_FILE_PATH, "w", encoding="utf-8") as f:
+with open(os.path.join(SANDBOX, "memory_store.json"), "w",
+          encoding="utf-8") as f:
     json.dump({
         "conversation": [{"role": "user", "content": "예전에 한 말"}],
         "long_term": [],
