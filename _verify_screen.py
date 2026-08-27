@@ -90,9 +90,25 @@ process.exit(reached ? 0 : 1);
 
 
 def scripts_in(path):
-    """<script> ... </script> 안쪽만 뽑는다. src= 로 불러오는 것은 건너뛴다."""
+    """<script> ... </script> 안쪽을 뽑는다.
+
+    src= 로 불러오는 것 중 **우리가 만든 것**(/static/*.js)은 그 파일을
+    읽어 앞에 붙인다. 안 붙이면 거기 있는 이름을 못 찾아 없다고 한다.
+    unpkg 같은 남의 것은 건너뛴다 — 가짜(THREE)로 대신한다.
+    """
     import io
-    lines = io.open(path, encoding="utf-8").read().split("\n")
+    import re
+
+    text = io.open(path, encoding="utf-8").read()
+    lines = text.split("\n")
+
+    ours = []
+
+    for m in re.finditer(r'<script[^>]*src="(/static/[^"]+\.js)"', text):
+        f = os.path.join(HERE, m.group(1).lstrip("/").replace("/", os.sep))
+        if os.path.isfile(f):
+            ours.append(io.open(f, encoding="utf-8").read())
+
     out, buf, on = [], [], False
 
     for line in lines:
@@ -106,6 +122,12 @@ def scripts_in(path):
             continue
         if on:
             buf.append(line)
+
+    # 우리 것을 앞에 붙인다. 화면이 그것을 먼저 읽기 때문이다.
+    if ours and out:
+        out[0] = "\n".join(ours) + "\n" + out[0]
+    elif ours:
+        out = ours
 
     return out
 
@@ -153,8 +175,50 @@ def main():
 
     shutil.rmtree(tmp, ignore_errors=True)
 
+    fails += no_wake_surprise()
+
     print("\n" + ("전부 통과" if fails == 0 else f"{fails}건 실패"))
     return 0 if fails == 0 else 1
+
+
+def no_wake_surprise():
+    """자다 깨면서 놀라는 기믹이 되살아나지 않았는가.
+
+    깨울 때마다 놀란 얼굴이 스치는 것이 어색해서 통째로 걷어냈다.
+    자기를 부르는 사람에게 놀랄 이유가 없다.
+
+    놀람 자체를 없앤 것은 아니다 — 부끄러울 때, 다가올 때, 말이
+    끊겼을 때는 그대로 쓴다. 여기서 막는 것은 **깰 때** 하나다.
+    """
+    import io
+
+    print()
+
+    banned = ("surprise_upto", "wake_surprise", "wakeMs")
+
+    look = ["avatar.py"] + PAGES
+    bad = []
+
+    for rel in look:
+        path = os.path.join(HERE, rel)
+
+        if not os.path.isfile(path):
+            continue
+
+        text = io.open(path, encoding="utf-8").read()
+
+        for word in banned:
+            if word in text:
+                bad.append(f"{rel} 에 {word}")
+
+    if bad:
+        print("  FAIL  깰 때 놀라는 기믹이 남아 있다")
+        for b in bad:
+            print("        " + b)
+        return 1
+
+    print("  PASS  깰 때 놀라는 기믹이 없다")
+    return 0
 
 
 if __name__ == "__main__":

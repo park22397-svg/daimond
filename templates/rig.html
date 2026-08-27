@@ -9,6 +9,7 @@
     <script src="https://unpkg.com/three@0.137.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://unpkg.com/three@0.137.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+    <script src="/static/vrm_pick.js"></script>
 
     <style>
         * { box-sizing: border-box; }
@@ -171,7 +172,8 @@
 
 <div id="stage">
     <canvas id="canvas"></canvas>
-    <div id="loading">VRM 15MB 불러오는 중…</div>
+    <div id="loading">VRM 불러오는 중…</div>
+
     <div id="hint">
         끌기 = 돌려보기 · 휠 = 확대 · 우클릭 끌기 = 이동<br>
         축 화살표 &nbsp;<span style="color:#ff7b7b">빨강 X</span>
@@ -338,41 +340,87 @@ const labelByBone = {};
 // VRM
 // ============================================================
 
-new THREE.GLTFLoader().load(
-    '/static/avatar.vrm',
-    (gltf) => {
-        if (THREE.VRMUtils) THREE.VRMUtils.removeUnnecessaryJoints(gltf.scene);
+// 아무 VRM 이나 열 수 있다.
+//
+// 다이아만 볼 것이면 주소를 박아 두면 되지만, 이 확인대는 다른 아바타를
+// 손볼 때도 쓴다. 그때마다 static/avatar.vrm 을 갈아 끼우게 하면
+// 원본을 잃기 쉽다. 파일을 고르면 그 자리에서 열고, 아무것도 안 고르면
+// 늘 보던 다이아를 연다.
 
-        THREE.VRM.from(gltf).then(vrm => {
-            currentVRM = vrm;
-            scene.add(vrm.scene);
+function clearVRM() {
+    if (!currentVRM) return;
 
-            // 모델은 -Z 를 보고 서 있다. 카메라 쪽으로 돌려세운다.
-            vrm.scene.rotation.y = Math.PI;
+    scene.remove(currentVRM.scene);
 
-            ALL_BONES.forEach(n => {
-                let node = null;
-                try { node = vrm.humanoid.getBoneNode(n); } catch (e) {}
-                if (node) boneNodes[n] = node;
-            });
-
-            loading.style.display = 'none';
-            buildPanel();
-            buildAxes();
-            loadEntity();
-        });
-    },
-    (p) => {
-        if (p.total) {
-            loading.textContent =
-                `VRM 불러오는 중… ${Math.round(p.loaded / p.total * 100)}%`;
+    currentVRM.scene.traverse(o => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+            (Array.isArray(o.material) ? o.material : [o.material])
+                .forEach(m => m && m.dispose());
         }
-    },
-    (e) => {
-        loading.textContent = 'VRM 불러오기 실패 — ' + e;
-        console.error(e);
-    }
-);
+    });
+
+    currentVRM = null;
+
+    Object.keys(boneNodes).forEach(k => delete boneNodes[k]);
+    Object.keys(axesByBone).forEach(k => delete axesByBone[k]);
+    Object.keys(labelByBone).forEach(k => delete labelByBone[k]);
+}
+
+
+function openVRM(url, name) {
+    loading.style.display = '';
+    loading.textContent = 'VRM 불러오는 중…';
+
+    clearVRM();
+
+    new THREE.GLTFLoader().load(
+        url,
+        (gltf) => {
+            if (THREE.VRMUtils) THREE.VRMUtils.removeUnnecessaryJoints(gltf.scene);
+
+            THREE.VRM.from(gltf).then(vrm => {
+                currentVRM = vrm;
+                scene.add(vrm.scene);
+
+                // 모델은 -Z 를 보고 서 있다. 카메라 쪽으로 돌려세운다.
+                vrm.scene.rotation.y = Math.PI;
+
+                ALL_BONES.forEach(n => {
+                    let node = null;
+                    try { node = vrm.humanoid.getBoneNode(n); } catch (e) {}
+                    if (node) boneNodes[n] = node;
+                });
+
+                loading.style.display = 'none';
+                VrmPick.say(name || '다이아');
+
+                buildPanel();
+                buildAxes();
+                loadEntity();
+            }).catch(e => {
+                loading.textContent = 'VRM 이 아니거나 읽을 수 없다 — ' + e;
+                console.error(e);
+            });
+        },
+        (p) => {
+            if (p.total) {
+                loading.textContent =
+                    `VRM 불러오는 중… ${Math.round(p.loaded / p.total * 100)}%`;
+            }
+        },
+        (e) => {
+            loading.textContent = 'VRM 불러오기 실패 — ' + e;
+            console.error(e);
+        }
+    );
+}
+
+
+// 파일 고르기는 확인대 셋이 나눠 쓴다(static/vrm_pick.js).
+VrmPick.mount({ onOpen: (url, name) => openVRM(url, name) });
+
+openVRM('/static/avatar.vrm', '다이아');
 
 
 // ============================================================

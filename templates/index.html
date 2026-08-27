@@ -105,7 +105,8 @@
             gap: 8px;
         }
 
-        #rps-open {
+        #rps-open,
+        #chess-open {
             background: rgba(20, 22, 42, 0.72);
             border: 1px solid #3a3f68;
             color: #dfe1f0;
@@ -241,6 +242,242 @@
             background: rgba(132, 142, 220, 0.95);
         }
 
+        /* 체스판.
+           가운데에 두면 다이아 얼굴을 가린다. 그래서 옆으로 비킨다.
+
+           **다이아 기준 오른쪽 = 화면 왼쪽**이다. 이쪽을 보고 서 있으니
+           그의 오른손은 우리가 볼 때 왼쪽에 있다.
+
+           그 자리에는 눈 단추 줄(왼쪽 14~52px, 위 96px부터)이 있어서
+           그 옆으로 세운다(왼쪽 62px). 아래로는 조이스틱(아래 20px에서
+           138px 높이)을 안 건드리게 판을 32px 칸으로 줄였다. */
+        #chess-panel {
+            /* 칸 하나의 크기.
+               2배로 키웠다(32 -> 64). 다만 창이 낮으면 판이 화면 밖으로
+               나가므로 창 높이를 따라 줄어들게 둔다. 아무리 작아도
+               34px 아래로는 안 간다 — 그보다 작으면 말이 안 보인다. */
+            --sq: clamp(34px, 7.4vh, 64px);
+
+            position: absolute;
+            left: 62px;
+            top: 96px;
+            z-index: 20;
+            cursor: default;
+            display: none;
+            padding: 12px;
+            background: rgba(14, 16, 32, 0.94);
+            border: 1px solid #3a3f68;
+            border-radius: 14px;
+            color: #dfe1f0;
+            user-select: none;
+        }
+
+        #chess-panel.on { display: block; }
+
+        /* 판을 여는 동안은 조이스틱을 감춘다.
+           창이 낮으면(높이 500px쯤) 판 아래쪽과 겹친다. 계산해 보면
+           판은 위 96에서 448까지고 조이스틱 윗변은 창 높이 - 138 이라,
+           창이 586px보다 낮으면 부딪친다.
+           체스를 두면서 걸어 다닐 일은 없으므로 감추는 편이 낫다.
+           방향키는 그대로 듣는다 — 단추만 감춘 것이다. */
+        #avatar-container.chess #stick-pad,
+        #avatar-container.chess #stick-keys { display: none; }
+
+        /* 머리를 잡아 끌면 판이 따라온다.
+           판이 커져서 어디에 두든 무언가는 가린다. 그러면 자리를
+           고정할 게 아니라 옮길 수 있게 하는 편이 낫다. */
+        #chess-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 9px;
+            font-size: 0.82rem;
+            cursor: grab;
+        }
+
+        #chess-panel.dragging #chess-head { cursor: grabbing; }
+
+        /* 단추는 끌기가 아니라 눌리는 것이다 */
+        #chess-head button { cursor: pointer; }
+
+        #chess-turn { flex: 1; color: #b9bcd8; }
+
+        #chess-head button {
+            background: rgba(58, 63, 104, 0.5);
+            border: 1px solid #4a4f7a;
+            color: #dfe1f0;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        #chess-head button:hover {
+            background: #5a4d8d;
+            border-color: #7a68b0;
+        }
+
+        /* 난이도 고르기 */
+        #chess-levels {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 7px;
+        }
+
+        #chess-levels button {
+            flex: 1;
+            padding: 4px 0;
+            background: rgba(20, 22, 42, 0.72);
+            border: 1px solid #3a3f68;
+            color: #8a8fb5;
+            border-radius: 7px;
+            font-size: 0.74rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        /* 어느 말을 잡을 것인가 */
+        #chess-sides {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 7px;
+        }
+
+        #chess-sides button {
+            flex: 1;
+            padding: 4px 0;
+            background: rgba(20, 22, 42, 0.72);
+            border: 1px solid #3a3f68;
+            color: #8a8fb5;
+            border-radius: 7px;
+            font-size: 0.74rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        #chess-sides button.on {
+            background: #4a3f77;
+            border-color: #7a68b0;
+            color: #fff;
+        }
+
+        /* 선공을 가리는 가위바위보.
+           왼쪽 위 가위바위보 단추는 그냥 노는 것이고, 이건 판을
+           시작하는 절차다. 둘이 섞이면 무엇을 누르는지 헷갈리므로
+           판 안에 따로 둔다. */
+        #chess-decide {
+            display: none;
+            gap: 5px;
+            margin-bottom: 8px;
+        }
+
+        #chess-decide.on { display: flex; }
+
+        #chess-decide button {
+            flex: 1;
+            padding: 8px 0;
+            background: rgba(74, 63, 119, 0.35);
+            border: 1px solid #7a68b0;
+            color: #dfe1f0;
+            border-radius: 9px;
+            font-size: 0.86rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        #chess-decide button:hover { background: #5a4d8d; }
+
+        /* 선공을 정하는 동안에는 판과 설정을 감춘다.
+           아직 무슨 색인지도 안 정했는데 판을 보여 주면 헷갈린다. */
+        #chess-panel.deciding #chess-board,
+        #chess-panel.deciding #chess-sides,
+        #chess-panel.deciding #chess-taken { display: none; }
+
+        #chess-levels button.on {
+            background: #4a3f77;
+            border-color: #7a68b0;
+            color: #fff;
+        }
+
+        /* 판.
+           8칸씩 여덟 줄. 칸 하나가 32px 이라 판이 256px 이다. */
+        #chess-board {
+            display: grid;
+            grid-template-columns: repeat(8, var(--sq));
+            grid-template-rows: repeat(8, var(--sq));
+            border: 1px solid #3a3f68;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .sq {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: calc(var(--sq) * 0.68);
+            line-height: 1;
+            cursor: pointer;
+            position: relative;
+        }
+
+        /* 밝은 칸과 어두운 칸.
+           말은 흰 것도 검은 것도 또렷해야 하므로 칸은 너무 밝지도
+           어둡지도 않게 둔다. */
+        .sq.light { background: #b8bad4; }
+        .sq.dark { background: #6f7396; }
+
+        /* 흰 말과 검은 말.
+           유니코드 흰 말(♙)은 속이 비어 있어 밝은 칸에서 안 보인다.
+           그래서 둘 다 검은 글리프(♟)를 쓰고 색으로만 가른다. */
+        .sq .w { color: #ffffff; text-shadow: 0 0 2px #333, 0 1px 2px #0006; }
+        .sq .b { color: #1a1a24; text-shadow: 0 0 2px #fff6; }
+
+        /* 지금 고른 말 */
+        .sq.pick { background: #7a68b0; }
+
+        /* 그 말이 갈 수 있는 자리 */
+        .sq.can::after {
+            content: '';
+            position: absolute;
+            width: calc(var(--sq) * 0.34);
+            height: calc(var(--sq) * 0.34);
+            border-radius: 50%;
+            background: rgba(122, 104, 176, 0.75);
+        }
+
+        /* 갈 수 있는데 거기 상대 말이 있으면 = 잡는 자리 */
+        .sq.can.take::after {
+            width: calc(var(--sq) * 0.84);
+            height: calc(var(--sq) * 0.84);
+            background: transparent;
+            border: 3px solid rgba(224, 138, 154, 0.9);
+        }
+
+        /* 방금 둔 수 */
+        .sq.last { box-shadow: inset 0 0 0 3px rgba(255, 231, 143, 0.55); }
+
+        /* 장군 맞은 왕 */
+        .sq.check { box-shadow: inset 0 0 0 3px rgba(224, 90, 110, 0.95); }
+
+        #chess-taken {
+            display: flex;
+            gap: 2px;
+            min-height: 20px;
+            margin-top: 7px;
+            font-size: 17px;
+            line-height: 1;
+            opacity: 0.75;
+        }
+
+        #chess-msg {
+            margin-top: 5px;
+            font-size: 0.75rem;
+            color: #8a8fb5;
+            min-height: 1.1em;
+            max-width: calc(var(--sq) * 8);
+        }
+
         /* 누구로 들어와 있는지.
            오른쪽 아래는 비어 있다 — 왼쪽 아래는 조이스틱(20~138px)과
            앉기·점프(150px~)가 쓰고, 오른쪽 위는 사이 표가 쓴다. */
@@ -303,9 +540,11 @@
         #stick-keys button:hover { background: rgba(42, 47, 82, 0.9); }
         #stick-keys button.on { background: #4a3f77; border-color: #7a68b0; }
 
-        #rps-open:hover { background: rgba(42, 47, 82, 0.9); }
+        #rps-open:hover,
+        #chess-open:hover { background: rgba(42, 47, 82, 0.9); }
 
-        #rps-open.on { background: #4a3f77; border-color: #7a68b0; }
+        #rps-open.on,
+        #chess-open.on { background: #4a3f77; border-color: #7a68b0; }
 
         /* 말로 가위바위보를 청했을 때 어느 단추인지 알려준다 */
         #rps-open.call { animation: rpscall 0.85s ease-in-out 4; }
@@ -803,9 +1042,10 @@
         <!-- 지금 무엇으로 만지고 있는지 -->
         <div id="tool-badge" title="우클릭해서 바꾸기">🖐 손</div>
 
-        <!-- 가위바위보 -->
+        <!-- 놀이 -->
         <div id="rps-bar">
             <button id="rps-open">✌ 가위바위보</button>
+            <button id="chess-open">♟ 체스</button>
             <div id="rps-hands"></div>
         </div>
 
@@ -819,6 +1059,22 @@
             <video id="eye-video" autoplay playsinline muted></video>
         </div>
         <input type="file" id="eye-file" accept="image/*" style="display:none">
+
+        <!-- 체스판 -->
+        <div id="chess-panel">
+            <div id="chess-head">
+                <span id="chess-turn">…</span>
+                <button id="chess-new">새 판</button>
+                <button id="chess-giveup">그만</button>
+                <button id="chess-close">닫기</button>
+            </div>
+            <div id="chess-levels"></div>
+            <div id="chess-sides"></div>
+            <div id="chess-decide"></div>
+            <div id="chess-board"></div>
+            <div id="chess-taken"></div>
+            <div id="chess-msg"></div>
+        </div>
 
         <!-- 누구로 들어와 있는가 -->
         <div id="who-badge">
@@ -8208,6 +8464,19 @@
             }
 
 
+            // 체스하자고 하면 판을 연다.
+            //
+            // 예전에는 단추를 가리키기만 했다. 놀자고 말했는데 단추를
+            // 찾으라고 하면 한 박자 끊긴다. 열자마자 선공을
+            // 가위바위보로 정한다.
+            if (
+                handleChessCommand(text)
+            ) {
+
+                return;
+            }
+
+
             // 가위바위보는 모델에게 묻지 않고 바로 단추를 가리킨다
             if (
                 handleRpsCommand(text)
@@ -8258,8 +8527,8 @@
                 //
                 // 예전에는 여기서 곧바로 놀라게 했는데, 모델이 답을
                 // 내놓기까지 8초가 걸리는 동안 그 얼굴로 굳어 있었다.
-                // 놀랄지 말지는 아래 깨어나기 차례가 호감을 보고 정한다
-                // (behavior.wake.surprise_upto · wake_surprise_ms).
+                // **깨울 때 놀라는 것은 이제 아예 없앴다** — 자기를
+                // 부르는 사람에게 놀랄 이유가 없다.
                 // 지금은 눈만 뜨고(wakeUp) 기다린다.
 
                 // 대신 잠결 얼굴로 기다린다.
@@ -8313,7 +8582,15 @@
                                     const c = wasCutOff;
                                     wasCutOff = false;
                                     return c;
-                                })()
+                                })(),
+
+                                // 자고 있다가 이 말에 깨어났는가.
+                                //
+                                // 서버는 다이아가 자는지 몰랐다. 그래서
+                                // 깨우면 시간만 보고 **자기가 상대를 깨운
+                                // 줄 알고 사과했다.** 누가 깨웠는지는
+                                // 화면만 아는 것이므로 같이 보낸다.
+                                woke: wasSleeping
                             })
                         }
                     );
@@ -8351,22 +8628,18 @@
 
                 } else {
 
-                    // 자다 깼으면 놀람은 스치듯 지나가고 곧 제 얼굴로 돌아온다.
-                    // 다정하게 깨웠으면 반가워하며 손을 흔든다.
-                    const wake = wasSleeping;
-
-                    // 자다 깼을 때는 깨우는 말투에 따라 갈린다.
+                    // 자다 깼을 때. 사이가 얼마나 깊은지로 갈린다.
                     //
-                    //   다정하게  : 놀람 -> 기쁨 + 손 흔들기 + 말하기를 한꺼번에
-                    //   그냥      : 놀람 -> 무표정으로 말하고, 말을 마친 뒤 기지개
-                    //
-                    // 그냥 깨웠을 때 기지개가 뒤로 가는 이유는, 잠을 터는 일이
-                    // 대답보다 먼저 나오면 말을 걸어 놓고 기다리는 꼴이 되어서다.
-                    // 자다 깼을 때. 사이가 얼마나 깊은지로 셋으로 갈린다.
-                    //
-                    //   낮으면  놀라기만 하고 곧 대화한다.
+                    //   낮으면  그냥 눈을 뜨고 대화한다.
                     //   보통    기쁨 + 기지개로 잠을 털고 이야기를 시작한다.
                     //   깊으면  기지개를 켠 뒤 손을 흔들며 반긴다.
+                    //
+                    // **깨울 때 놀라는 것은 없앴다.** 매번 깨울 때마다
+                    // 놀란 얼굴이 스치는 것이 어색했다. 자기를 부르는
+                    // 사람에게 놀랄 이유가 없다. 놀람은 부끄러울 때와
+                    // 진짜로 놀랐을 때만 남는다.
+                    const wake = wasSleeping;
+
                     const wk = (ENTITY && ENTITY.behavior
                         && ENTITY.behavior.wake) || {};
 
@@ -8381,11 +8654,6 @@
                         ? data.relationship.affinity
                         : ((typeof myAffinity === 'number') ? myAffinity : 0);
 
-                    // 놀라는 것은 사이가 없다시피 할 때뿐이다.
-                    // 조금이라도 정이 들면 누가 깨우는지 알아서 안 놀란다.
-                    const startles = aff <= (typeof wk.surprise_upto === 'number'
-                        ? wk.surprise_upto : 0);
-
                     // 기지개는 친구부터. 잠을 털며 일어난다.
                     const stretches = aff >= (typeof wk.stretch_from === 'number'
                         ? wk.stretch_from : 40);
@@ -8396,9 +8664,6 @@
                     const finalFace = wake
                         ? (stretches ? 'joy' : 'neutral')
                         : (data.expression || 'neutral');
-
-                    const surpriseMs = (ENTITY && ENTITY.behavior
-                        && ENTITY.behavior.wake_surprise_ms) || 420;
 
                     if (typeof data.mood === 'number') {
                         myMood.level = data.mood;
@@ -8421,15 +8686,13 @@
 
                         // 자다 깼을 때는 몸이 먼저고 말이 나중이다.
                         //
-                        //   놀랄 사이   놀람 -> 말하기
-                        //   친구 이상   기지개 -> 말하기
-                        //   사랑 이상   기지개 -> 손인사하면서 말하기
+                        //   사이가 얕으면  그냥 말하기
+                        //   친구 이상      기지개 -> 말하기
+                        //   사랑 이상      기지개 -> 손인사하면서 말하기
                         //
                         // 잠은 털고 나서 말한다. 말부터 해 놓고 기지개를 켜면
                         // 말해 놓고 딴짓하는 꼴이 된다.
                         // 다만 인사는 말과 함께 간다 — 사람은 손을 흔들면서 말한다.
-                        if (startles) applyExpression('surprised');
-
                         const talk = (face) => {
                             showReply(data.reply, face || finalFace, data.cues);
                         };
@@ -8447,25 +8710,20 @@
                             talk('fun');
                         };
 
-                        setTimeout(() => {
+                        if (!stretches) {
+                            // 기지개도 인사도 없는 사이. 눈만 뜨고 답한다.
+                            applyExpression(finalFace);
+                            talk();
 
-                            if (!stretches) {
-                                applyExpression(finalFace);
-                                talk();
-                                return;
-                            }
-
-
+                        } else {
                             // 기지개를 켤 때는 기쁨으로 못박는다.
-                            // 놀란 얼굴로 몸을 펴지 않게 하려는 것이다.
                             applyExpression('joy');
                             roam.state = 'gesture';
                             playMotion('stretch');
 
                             const st = motionByKey('stretch');
                             setTimeout(wave, (st ? st.duration : 2.8) * 1000);
-
-                        }, startles ? surpriseMs : 0);
+                        }
 
                     } else {
                         showReply(data.reply, finalFace, data.cues);
@@ -8914,6 +9172,508 @@
             }
         );
 
+
+        // ============================================================
+        // 체스
+        //
+        // 규칙과 다이아의 수는 서버가 정한다. 여기는 판을 그리고
+        // 누른 자리를 수로 바꿔 보내는 일만 한다.
+        //
+        // 둘 수 있는 수 목록(moves)을 서버가 같이 주므로 화면은 규칙을
+        // 몰라도 된다. 규칙을 여기에도 적으면 서버와 어긋나고,
+        // 어긋나면 **화면에서는 되는데 서버가 거부하는** 수가 생긴다.
+        // ============================================================
+
+        const chessPanel = document.getElementById('chess-panel');
+        const chessBoard = document.getElementById('chess-board');
+        const chessTurn = document.getElementById('chess-turn');
+        const chessTaken = document.getElementById('chess-taken');
+        const chessMsg = document.getElementById('chess-msg');
+        const chessLevels = document.getElementById('chess-levels');
+        const chessSides = document.getElementById('chess-sides');
+        const chessDecide = document.getElementById('chess-decide');
+        const chessOpen = document.getElementById('chess-open');
+        const chessNew = document.getElementById('chess-new');
+        const chessGiveUp = document.getElementById('chess-giveup');
+        const chessClose = document.getElementById('chess-close');
+
+        // 말 글자. 대문자가 흰 쪽이다(서버가 그렇게 준다).
+        const CHESS_GLYPH = {
+            k: '♚', q: '♛', r: '♜',
+            b: '♝', n: '♞', p: '♟',
+        };
+
+        const chessGame = {
+            on: false,        // 판이 열려 있는가
+            rows: null,       // 여덟 줄
+            moves: [],        // 둘 수 있는 수 (uci)
+            turn: null,
+            you: 'white',
+            last: null,
+            over: false,
+            pick: null,       // 지금 고른 칸 (예: 'e2')
+            busy: false,
+            levels: null,     // 고를 수 있는 난이도 (서버가 준다)
+            level: null,      // 지금 고른 것
+            deciding: false,  // 선공을 가위바위보로 정하는 중인가
+            choose: false,    // 이겨서 내가 고를 차례인가
+            hands: null,      // 가위바위보 손 (서버가 준다)
+        };
+
+        // 칸 이름 <-> 줄/칸 번호.
+        // 서버가 준 rows[0] 이 8행이다(위에서부터).
+        function sqName(r, f) {
+            return 'abcdefgh'[f] + (8 - r);
+        }
+
+        // 내 말이 아래에 오게 판을 돌린다.
+        //
+        // 서버는 늘 8행부터(흰 쪽이 아래) 준다. 검은 말을 잡았으면
+        // 그대로 그리면 **내 말이 저쪽 끝에 있다.** 판을 마주 앉아
+        // 보는 것이므로 돌려서 그린다.
+        function flipped() {
+            return chessGame.you === 'black';
+        }
+
+        // 화면의 (줄, 칸) 을 서버가 준 (줄, 칸) 으로.
+        function realAt(r, f) {
+            return flipped() ? [7 - r, 7 - f] : [r, f];
+        }
+
+        // ------------------------------------------------------------
+        // 체스하자고 말하면 판이 열린다
+        //
+        // 예전에는 단추를 가리키기만 했다("왼쪽 위 단추로 내주세요").
+        // 놀자고 말했는데 단추를 찾으라고 하면 한 박자 끊긴다.
+        // 말했으면 열어 주는 편이 낫다.
+        //
+        // 열자마자 선공을 가위바위보로 정한다. 체스는 흰 쪽이 먼저
+        // 두므로 그것을 누가 가져갈지 가려야 한다.
+        // ------------------------------------------------------------
+
+        function chessCfg() {
+            return (ENTITY && ENTITY.game && ENTITY.game.chess) || {};
+        }
+
+        function handleChessCommand(text) {
+            const list = chessCfg().triggers || [];
+            if (!list.length) return false;
+
+            const flat = text.replace(/\s+/g, '').toLowerCase();
+            const hit = list.some(w =>
+                flat.includes(String(w).replace(/\s+/g, '').toLowerCase()));
+
+            if (!hit) return false;
+
+            appendMessage('user', text);
+
+            if (isSleeping) wakeUp();
+            faceUser();
+
+            openChess(true);
+
+            return true;
+        }
+
+
+        // 선공을 가리는 가위바위보.
+        //
+        // 판 위에 손 세 개를 띄운다. 체스판 안에 두는 이유는, 왼쪽 위
+        // 가위바위보 단추는 그냥 노는 것이고 이건 판을 시작하는
+        // 절차라서다. 둘이 섞이면 무엇을 누르는지 헷갈린다.
+        function drawDecide() {
+            const g = chessGame;
+
+            chessDecide.innerHTML = '';
+
+            if (!g.deciding) {
+                chessDecide.classList.remove('on');
+                return;
+            }
+
+            chessDecide.classList.add('on');
+
+            if (g.choose) {
+                // 이겼으니 내가 고른다
+                CHESS_SIDES.forEach(sd => {
+                    const b = document.createElement('button');
+                    b.textContent = sd.label;
+                    b.addEventListener('click', () => {
+                        if (g.busy) return;
+                        g.deciding = false;
+                        g.choose = false;
+                        chessCall('/api/chess/new', { you: sd.key });
+                    });
+                    chessDecide.appendChild(b);
+                });
+                return;
+            }
+
+            (g.hands || []).forEach(h => {
+                const b = document.createElement('button');
+                b.textContent = h.icon + ' ' + h.label;
+                b.addEventListener('click', () => {
+                    if (g.busy) return;
+                    playMotion(h.motion);
+                    chessCall('/api/chess/rps', { hand: h.key });
+                });
+                chessDecide.appendChild(b);
+            });
+        }
+
+
+        // 어느 말을 잡을 것인가.
+        //
+        // 고르면 판을 새로 연다. 두던 판의 색만 바꿀 수는 없다 —
+        // 이미 놓인 말들이 반대편 것이 되어 버린다.
+        const CHESS_SIDES = [
+            { key: 'white', label: '⚪ 흰 말 (먼저)' },
+            { key: 'black', label: '⚫ 검은 말 (나중)' },
+        ];
+
+        function drawSides() {
+            const g = chessGame;
+
+            chessSides.innerHTML = '';
+
+            CHESS_SIDES.forEach(sd => {
+                const b = document.createElement('button');
+                b.textContent = sd.label;
+                if (sd.key === g.you) b.classList.add('on');
+
+                b.addEventListener('click', () => {
+                    if (g.busy || sd.key === g.you) return;
+                    g.pick = null;
+                    chessCall('/api/chess/new', { you: sd.key });
+                });
+
+                chessSides.appendChild(b);
+            });
+        }
+
+
+        // 난이도 단추.
+        //
+        // 무엇이 있는지는 서버가 준다. 여기에 이름을 적어 두면 개체와
+        // 어긋나고, 어긋나면 화면에는 있는데 서버가 모르는 난이도가 생긴다.
+        function drawLevels() {
+            const g = chessGame;
+
+            if (!g.levels || !g.levels.length) return;
+
+            chessLevels.innerHTML = '';
+
+            g.levels.forEach(lv => {
+                const b = document.createElement('button');
+                b.textContent = lv.label;
+                if (lv.key === g.level) b.classList.add('on');
+
+                b.addEventListener('click', () => {
+                    if (g.busy || lv.key === g.level) return;
+                    g.level = lv.key;
+                    drawLevels();
+                    chessCall('/api/chess/level', { level: lv.key });
+                });
+
+                chessLevels.appendChild(b);
+            });
+        }
+
+
+        function drawChess() {
+            chessBoard.innerHTML = '';
+
+            const g = chessGame;
+
+            if (!g.rows) return;
+
+            // 지금 고른 말이 갈 수 있는 자리
+            const targets = {};
+
+            if (g.pick) {
+                g.moves.forEach(m => {
+                    if (m.slice(0, 2) === g.pick) targets[m.slice(2, 4)] = true;
+                });
+            }
+
+            for (let r = 0; r < 8; r++) {
+                for (let f = 0; f < 8; f++) {
+                    // 화면 자리와 판 자리를 가른다.
+                    // 검은 말을 잡았으면 둘이 뒤집혀 있다.
+                    const [rr, ff] = realAt(r, f);
+
+                    const name = sqName(rr, ff);
+                    const ch = g.rows[rr][ff];
+
+                    const el = document.createElement('div');
+                    el.className = 'sq '
+                        + ((rr + ff) % 2 === 0 ? 'light' : 'dark');
+
+                    if (ch !== '.') {
+                        const span = document.createElement('span');
+                        // 대문자면 흰 쪽
+                        const white = ch === ch.toUpperCase();
+                        span.className = white ? 'w' : 'b';
+                        span.textContent = CHESS_GLYPH[ch.toLowerCase()] || '';
+                        el.appendChild(span);
+                    }
+
+                    if (g.pick === name) el.classList.add('pick');
+
+                    if (targets[name]) {
+                        el.classList.add('can');
+                        if (ch !== '.') el.classList.add('take');
+                    }
+
+                    if (g.last &&
+                        (g.last.slice(0, 2) === name || g.last.slice(2, 4) === name)) {
+                        el.classList.add('last');
+                    }
+
+                    if (g.check && ch.toLowerCase() === 'k') {
+                        const white = ch === ch.toUpperCase();
+                        const turnWhite = g.turn === 'white';
+                        if (white === turnWhite) el.classList.add('check');
+                    }
+
+                    el.addEventListener('click', () => clickSquare(name, ch));
+
+                    chessBoard.appendChild(el);
+                }
+            }
+        }
+
+        function clickSquare(name, ch) {
+            const g = chessGame;
+
+            if (g.busy || g.over || !g.on) return;
+            if (g.turn !== g.you) return;
+
+            // 이미 고른 말이 있고, 여기로 갈 수 있으면 둔다
+            if (g.pick) {
+                const want = g.pick + name;
+                const found = g.moves.find(m => m.slice(0, 4) === want);
+
+                if (found) {
+                    g.pick = null;
+                    sendChessMove(found);
+                    return;
+                }
+            }
+
+            // 내 말을 고른다. 빈 칸이나 남의 말이면 고르기를 푼다.
+            const mine = ch !== '.' &&
+                ((ch === ch.toUpperCase()) === (g.you === 'white'));
+
+            g.pick = mine ? name : null;
+            drawChess();
+        }
+
+        function applyChess(d) {
+            const g = chessGame;
+
+            if (!d || d.ok === false) {
+                chessMsg.textContent = (d && d.error) || '안 되네요.';
+                return;
+            }
+
+            g.on = !!d.playing || !!d.rows;
+            g.rows = d.rows || g.rows;
+            g.moves = d.moves || [];
+            g.turn = d.turn;
+            g.you = d.you || g.you;
+            g.last = d.last || null;
+            g.check = !!d.check;
+            g.over = !!d.over;
+
+            if (d.levels) g.levels = d.levels;
+            if (d.level) g.level = d.level;
+            if (d.hands) g.hands = d.hands;
+
+            g.deciding = !!d.deciding;
+            g.choose = !!d.choose;
+
+            chessPanel.classList.toggle('deciding', g.deciding);
+
+            drawDecide();
+            drawSides();
+            drawLevels();
+            drawChess();
+
+            chessTurn.textContent = g.over
+                ? '판이 끝났습니다'
+                : (g.turn === g.you ? '당신 차례' : '다이아가 두는 중…');
+
+            // 다이아가 한 말은 말풍선으로 보낸다.
+            // 채팅 칸에도 남겨야 나중에 무슨 이야기를 했는지 이어진다.
+            if (d.line) {
+                showReply(d.line, d.expression || 'neutral', []);
+                chessMsg.textContent = '';
+            }
+
+            if (d.error) chessMsg.textContent = d.error;
+        }
+
+        async function chessCall(path, body) {
+            chessGame.busy = true;
+
+            try {
+                const r = await fetch(path, {
+                    method: body ? 'POST' : 'GET',
+                    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+                    body: body ? JSON.stringify(body) : undefined,
+                }).then(r => r.json());
+
+                applyChess(r);
+                return r;
+
+            } catch (e) {
+                console.warn('[diamondAI] 체스 실패', e);
+                chessMsg.textContent = '서버에 닿지 못했습니다.';
+                return null;
+
+            } finally {
+                chessGame.busy = false;
+            }
+        }
+
+        function sendChessMove(uci) {
+            chessTurn.textContent = '다이아가 두는 중…';
+            return chessCall('/api/chess/move', { move: uci });
+        }
+
+        function openChess(fresh) {
+            chessPanel.classList.add('on');
+            chessOpen.classList.add('on');
+            avatarContainer.classList.add('chess');
+
+            loadChessPos();
+
+            // 자고 있으면 바로 깨운다.
+            //
+            // 말을 걸어 깨울 때는 기지개를 켜고 손을 흔들지만, 놀이는
+            // 그 사이에 못 기다린다. 판을 열었으면 이미 마주 앉은 것이다.
+            // wakeUp() 은 눈만 뜨고 자세를 되돌린다 — 기지개도 인사도 없다.
+            if (isSleeping) wakeUp();
+
+            // 말로 불러서 연 것이면(fresh) 선공부터 가위바위보로 정한다.
+            // 두던 판이 있어도 새로 시작하는 것이 맞다 - 놀자고 했으니까.
+            if (fresh) {
+                chessGame.pick = null;
+                chessCall('/api/chess/start', {});
+                return;
+            }
+
+            // 두던 판이 있으면 그것을, 없으면 선공부터 정한다.
+            chessCall('/api/chess/state').then(r => {
+                if (r && !r.playing && !r.deciding) {
+                    chessCall('/api/chess/start', {});
+                }
+            });
+        }
+
+        function closeChess() {
+            chessPanel.classList.remove('on');
+            chessOpen.classList.remove('on');
+            avatarContainer.classList.remove('chess');
+        }
+
+        // ------------------------------------------------------------
+        // 판 옮기기
+        //
+        // 판이 커져서 어디에 두든 무언가는 가린다. 자리를 정해 주는
+        // 대신 옮길 수 있게 한다. 머리를 잡아 끌면 따라온다.
+        //
+        // 옮긴 자리는 이 브라우저에 적어 둔다. 다음에 열 때 거기 그대로
+        // 있어야 매번 옮기지 않는다.
+        // ------------------------------------------------------------
+
+        const CHESS_POS_KEY = 'dia.chess.pos';
+
+        const chessDrag = { on: false, dx: 0, dy: 0 };
+
+        function placeChess(x, y) {
+            const box = avatarContainer.getBoundingClientRect();
+            const me = chessPanel.getBoundingClientRect();
+
+            // 창 밖으로 나가지 않게 가둔다. 나가면 머리를 못 잡아
+            // 되돌릴 수가 없다.
+            const maxX = Math.max(0, box.width - me.width);
+            const maxY = Math.max(0, box.height - me.height);
+
+            chessPanel.style.left = Math.max(0, Math.min(maxX, x)) + 'px';
+            chessPanel.style.top = Math.max(0, Math.min(maxY, y)) + 'px';
+        }
+
+        function saveChessPos() {
+            try {
+                localStorage.setItem(CHESS_POS_KEY, JSON.stringify({
+                    x: parseFloat(chessPanel.style.left) || 0,
+                    y: parseFloat(chessPanel.style.top) || 0,
+                }));
+            } catch (e) { /* 저장 못 해도 판은 돈다 */ }
+        }
+
+        function loadChessPos() {
+            try {
+                const p = JSON.parse(localStorage.getItem(CHESS_POS_KEY));
+                if (p && typeof p.x === 'number') placeChess(p.x, p.y);
+            } catch (e) { /* 없으면 정해 둔 자리 */ }
+        }
+
+        document.getElementById('chess-head').addEventListener('mousedown', e => {
+            // 단추를 누른 것이면 끌기가 아니다
+            if (e.target.tagName === 'BUTTON') return;
+
+            const box = avatarContainer.getBoundingClientRect();
+            const me = chessPanel.getBoundingClientRect();
+
+            chessDrag.on = true;
+            chessDrag.dx = e.clientX - me.left;
+            chessDrag.dy = e.clientY - me.top;
+
+            chessPanel.classList.add('dragging');
+            e.preventDefault();
+        });
+
+        window.addEventListener('mousemove', e => {
+            if (!chessDrag.on) return;
+
+            const box = avatarContainer.getBoundingClientRect();
+
+            placeChess(e.clientX - box.left - chessDrag.dx,
+                       e.clientY - box.top - chessDrag.dy);
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (!chessDrag.on) return;
+
+            chessDrag.on = false;
+            chessPanel.classList.remove('dragging');
+            saveChessPos();
+        });
+
+
+        chessOpen.addEventListener('click', () => {
+            if (chessPanel.classList.contains('on')) closeChess();
+            else openChess();
+        });
+
+        chessClose.addEventListener('click', closeChess);
+
+        chessNew.addEventListener('click', () => {
+            chessGame.pick = null;
+            chessCall('/api/chess/new', { you: chessGame.you });
+        });
+
+        chessGiveUp.addEventListener('click', () => {
+            chessGame.pick = null;
+            chessGame.on = false;
+            chessCall('/api/chess/resign', {}).then(() => {
+                chessBoard.innerHTML = '';
+                chessTurn.textContent = '판을 접었습니다';
+            });
+        });
 
         // ============================================================
         // 누구로 들어와 있는가

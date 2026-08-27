@@ -352,12 +352,24 @@ def update_relationship(user_text):
 
         # 얀데레처럼 되돌아가지 않는 단계에서는 깎이지 않는다.
         # 연인이 아니면 광기 앞에서 멈춘다.
-        affinity = AVATAR.apply_delta(affinity, delta, here, lover=lover)
+        affinity = AVATAR.apply_delta(
+            affinity, delta, here, lover=lover,
+            friends=bool(saved.get("friends", False))
+            if isinstance(saved, dict) else False)
 
     except Exception as e:
         print(f"[관계 점수 계산 오류]: {e}")
 
     stage = AVATAR.next_stage(affinity, prev_key)
+
+    # 아직 말을 안 놓았으면 존댓말로 되돌린다.
+    #
+    # 단계 표에는 친구부터 '반말' 이라 적혀 있지만, 말은 누가 놓자고
+    # 하고 상대가 받아야 놓는 것이다. 말투를 보는 자리가 열두 군데라
+    # **여기 한 곳에서 갈라 준다** — 한 군데만 빠뜨려도 거기서만
+    # 반말이 튀어나온다.
+    stage = AVATAR.speaking_stage(
+        stage, bool((load_relationship() or {}).get("friends", False)))
 
     transition = None
     if prev_key and prev_key != stage.key:
@@ -387,7 +399,7 @@ def _fallback(stage, polite_text, casual_text):
 # 핵심 대화 처리 프로세스
 # ============================================================
 
-def process_chat(user_text, seeing=None, cut_off=False):
+def process_chat(user_text, seeing=None, cut_off=False, woke=False):
     """상대의 말에 답한다.
 
     seeing 은 지금 눈에 보이는 것이다(카메라나 사진).
@@ -395,6 +407,9 @@ def process_chat(user_text, seeing=None, cut_off=False):
     여기서 다이아가 정한다. 눈이 대신 말하게 두지 않는다.
 
     cut_off 는 방금 말하던 것을 상대가 끊고 들어왔는가다.
+
+    woke 는 자고 있다가 이 말에 깨어났는가다. 서버는 다이아가 자는지
+    모르므로 화면이 알려 준다.
     """
 
     if not user_text:
@@ -569,6 +584,59 @@ def process_chat(user_text, seeing=None, cut_off=False):
     # 정하는 것이지 그때그때 문장으로 정할 일이 아니고, 받아들인 순간
     # 관계 자체가 달라지기 때문이다.
     # ----------------------------------------------------------
+
+    # ----------------------------------------------------------
+    # 친구가 되기
+    #
+    # 말을 놓자는 말도 모델에게 맡기지 않는다. 고백과 같은 이유다 —
+    # 받아들일지 말지는 사이가 정하는 것이고, 받아들인 순간부터
+    # 말투가 통째로 달라지기 때문이다.
+    #
+    # 고백보다 **먼저** 본다. 말을 놓아야 친구고, 친구가 되어야
+    # 그다음으로 넘어간다.
+    # ----------------------------------------------------------
+
+    if AVATAR.is_befriend(user_text):
+        try:
+            _saved = load_relationship() or {}
+            _friends = bool(_saved.get("friends", False))
+            _aff = _saved.get(
+                "affinity", AVATAR.relationship.get("start_affinity", 0))
+
+            # 이미 놓았으면 받아들이는 쪽으로(그때 대사가 다르다).
+            # 아직이면 사이를 본다.
+            _ok = _friends or AVATAR.befriend_accepts(stage)
+
+            r = AVATAR.befriend_reply(_ok, stage)
+
+            if _ok and not _friends:
+                _aff = AVATAR.clamp_affinity(
+                    _aff + r["affinity"], lover=bool(_saved.get("lover")),
+                    friends=True)
+
+                stage = AVATAR.next_stage(_aff, stage.key)
+
+                save_relationship(_aff, stage.key,
+                                  _saved.get("devotion_raw", 0),
+                                  _saved.get("lover", False),
+                                  friends=True)
+
+                affinity_now = _aff
+
+                print(f"[친구]: 말을 놓았습니다. 호감 {_aff}.")
+
+            elif not _ok:
+                print("[친구]: 아직 이르다")
+
+            if r["line"]:
+                return done(
+                    r["line"],
+                    expression=r["expression"],
+                    motion=r.get("motion"),
+                )
+
+        except Exception as e:
+            print(f"[친구 처리 오류]: {e}")
 
     if AVATAR.is_confession(user_text):
         try:
@@ -766,6 +834,53 @@ def process_chat(user_text, seeing=None, cut_off=False):
         messages.append({
             "role": "system",
             "content": f"[지금] {_when}",
+        })
+
+    # 자고 있다가 깨어났는가.
+    #
+    # 이것을 안 알려 주면 시간만 보고 **자기가 상대를 깨운 줄 알고
+    # 사과한다.** 실제로 "갑자기 깨워서 죄송해요" 라고 답한 적이 있다.
+    if woke:
+        messages.append({
+            "role": "system",
+            "content": "[깨어남] " + AVATAR.woke_note(),
+        })
+
+    # 가위바위보를 얼마나 했나.
+    #
+    # 놀아 놓고 다음 대화에서 모르면 같이 논 것이 아니다.
+    # 체스판과 같은 방식으로 상황만 준다.
+    try:
+        from memory_manager import load_memory_data as _lmd
+        _rps = AVATAR.rps_note((_lmd() or {}).get("rps"))
+    except Exception as e:
+        print(f"[가위바위보 전적 읽기 오류]: {e}")
+        _rps = None
+
+    if _rps:
+        messages.append({
+            "role": "system",
+            "content": f"[가위바위보] {_rps}",
+        })
+
+    # 체스를 두는 중인가.
+    #
+    # 판은 따로 저장되어 있는데 대화 쪽에서는 그걸 몰랐다. 그래서
+    # 한 판 두고 나서 "아까 체스 어땠어?" 하고 물으면 무슨 소리인지
+    # 몰랐다. 시간을 알려 주는 것과 같은 방식으로 상황만 넣는다 —
+    # 무슨 말을 하라고는 적지 않는다.
+    try:
+        from memory_manager import load_memory_data
+        _game = (load_memory_data() or {}).get("chess")
+        _chess = AVATAR.chess_note(_game)
+    except Exception as e:
+        print(f"[체스판 읽기 오류]: {e}")
+        _chess = None
+
+    if _chess:
+        messages.append({
+            "role": "system",
+            "content": f"[체스] {_chess}",
         })
 
     # 지금 눈에 보이는 것.

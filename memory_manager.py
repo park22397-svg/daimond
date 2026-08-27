@@ -183,6 +183,24 @@ def load_memory_data():
     if not isinstance(session, dict):
         session = {}
 
+    # 두던 체스판.
+    #
+    # 여기 안 적어 두면 저장할 때마다 사라진다 — 이 함수는 아는 항목만
+    # 골라 새 dict 를 만들어 돌려주기 때문이다(기분·session 과 같은 함정).
+    game_chess = data.get("chess", {})
+
+    if not isinstance(game_chess, dict):
+        game_chess = {}
+
+    # 가위바위보 전적.
+    #
+    # 체스판과 같은 이유로 여기 적어 둔다. 안 적으면 저장할 때마다
+    # 사라진다 - 이 함수는 아는 항목만 골라 새 dict 를 만든다.
+    game_rps = data.get("rps", {})
+
+    if not isinstance(game_rps, dict):
+        game_rps = {}
+
     if not isinstance(conversation, list):
         conversation = []
 
@@ -201,7 +219,9 @@ def load_memory_data():
         "relationship": relationship,
         "user": user,
         "mood": mood,
-        "session": session
+        "session": session,
+        "chess": game_chess,
+        "rps": game_rps,
     }
 
 
@@ -434,7 +454,7 @@ def load_relationship():
 
 def save_relationship(affinity, stage_key, devotion_raw=None, lover=None,
                       wants_child=None, strokes=None, climax=None,
-                      pregnant=None):
+                      pregnant=None, friends=None):
     """관계 상태를 저장한다.
 
     lover 는 고백을 주고받았는지다. 그 전에는 호감이 광기 앞에서 멈춘다.
@@ -459,6 +479,16 @@ def save_relationship(affinity, stage_key, devotion_raw=None, lover=None,
     if lover is None:
         lover = before.get("lover", False)
 
+    # 말을 놓았는가.
+    #
+    # 호감이 오르면 저절로 반말이 되던 것을 고쳤다. 누군가 말 놓자고
+    # 하고 상대가 받아야 놓는다. 적지 않고 부르면 이미 정해진 값을 둔다.
+    if friends is None:
+        friends = before.get("friends", False)
+
+    # 다이아가 먼저 말 놓자고 물어봤는가. 두 번 묻지 않게.
+    asked_friend = before.get("asked_friend", False)
+
     # 아이에 관한 것 넷.
     #
     #   wants_child : 아이를 갖겠다고 말했는가
@@ -481,6 +511,8 @@ def save_relationship(affinity, stage_key, devotion_raw=None, lover=None,
         "stage": str(stage_key),
         "devotion_raw": int(devotion_raw),
         "lover": bool(lover),
+        "friends": bool(friends),
+        "asked_friend": bool(asked_friend),
         "wants_child": bool(wants_child),
         "strokes": int(strokes),
         "climax": int(climax),

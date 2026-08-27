@@ -9,6 +9,7 @@
     <script src="https://unpkg.com/three@0.137.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://unpkg.com/three@0.137.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+    <script src="/static/vrm_pick.js"></script>
 
     <style>
         * { box-sizing: border-box; }
@@ -131,14 +132,9 @@
 
     <h2>3-1. 잠에서 깨어나기</h2>
     <div class="note">
-        놀란 얼굴이 얼마나 스쳐야 자연스러운지 맞춰 보는 자리다.<br>
-        놀람 → (이 시간) → 기쁨 + 기지개 순으로 돈다.
-        지금 개체에 적힌 값은 <b id="wakeNow">?</b> 다.
-    </div>
-    <div class="morph">
-        <label>놀람이 스치는 시간</label>
-        <input id="wakeMs" type="range" min="100" max="1000" step="50" value="300">
-        <span id="wakeMsVal">300</span>
+        기쁨 + 기지개로 잠을 털고, 사이가 깊으면 손까지 흔든다.<br>
+        <b>깨울 때 놀라는 것은 없앴다</b> — 자기를 부르는 사람에게
+        놀랄 이유가 없다. 놀람은 부끄러울 때와 진짜로 놀랐을 때만 쓴다.
     </div>
     <div class="row">
         <button onclick="playWake()">깨어나는 순서 보기</button>
@@ -469,45 +465,52 @@ function applySplits(parts) {
 // ============================================================
 // 잠에서 깨어나기
 //
-// 놀란 얼굴은 스치듯 지나가야 한다. 너무 길면 그 다음 얼굴이 묻히고,
-// 너무 짧으면 놀랐다는 게 안 보인다. 그 사이를 눈으로 찾는 자리다.
+// 예전에는 놀람이 먼저 스쳤다. 그 시간을 맞추려고 슬라이더까지
+// 뒀었는데, 깨울 때 놀라는 것 자체를 없앴다 — 매번 놀란 얼굴이
+// 스치는 것이 어색했다. 이제 잠을 털고 바로 반긴다.
 // ============================================================
 
 function playWake(withWave) {
-    const ms = parseInt(document.getElementById('wakeMs').value, 10);
+    applyFace('joy');
+    playMotion('stretch');
 
-    applyFace('surprised');
+    if (!withWave) return;
 
+    const st = (ENTITY.motions || []).find(m => m.key === 'stretch');
     setTimeout(() => {
-        applyFace('joy');
-        playMotion('stretch');
-
-        if (!withWave) return;
-
-        const st = (ENTITY.motions || []).find(m => m.key === 'stretch');
-        setTimeout(() => {
-            applyFace('fun');
-            playMotion('wave');
-        }, (st ? st.duration : 2.8) * 1000);
-
-    }, ms);
+        applyFace('fun');
+        playMotion('wave');
+    }, (st ? st.duration : 2.8) * 1000);
 }
+
+// 어느 파일을 겹칠 것인가.
+//
+// 여기 주소를 박아 두면 다른 아바타를 보려고 static 의 파일을 갈아
+// 끼워야 한다. 파일 열기로 고른 것이 있으면 그것을 쓴다.
+//
+// 겹치기는 파일이 둘이다 — 옷 입은 것과 그 안에 깔 맨몸.
+// 속 몸을 안 고르면 옷 입은 것 하나만으로도 열린다.
+const chosen = { dress: null, body: null };
 
 async function boot() {
     ENTITY = await fetch('/api/avatar').then(r => r.json());
 
-    const dressUrl = ENTITY.model.vrm;
-    const bodyUrl = ENTITY.model.vrm_body;
+    const dressUrl = chosen.dress || ENTITY.model.vrm;
+    const bodyUrl = chosen.body || (chosen.dress ? null : ENTITY.model.vrm_body);
 
     loading.textContent = '옷 입은 모델 불러오는 중…';
     dressVRM = await load(dressUrl);
     dressVRM.scene.rotation.y = Math.PI;
     scene.add(dressVRM.scene);
 
-    loading.textContent = '표현용 불러오는 중…';
-    bodyVRM = await load(bodyUrl);
-    bodyVRM.scene.rotation.y = Math.PI;
-    scene.add(bodyVRM.scene);
+    // 속 몸이 없으면 겹치기 없이 옷 입은 것만 본다.
+    // 다른 아바타는 맨몸 파일이 따로 없는 경우가 많다.
+    if (bodyUrl) {
+        loading.textContent = '속 몸 불러오는 중…';
+        bodyVRM = await load(bodyUrl);
+        bodyVRM.scene.rotation.y = Math.PI;
+        scene.add(bodyVRM.scene);
+    }
 
     // 옷 입은 모델에서 몸을 감춘다. 그 자리에 표현용 몸이 들어간다.
     let hidBody = 0;
@@ -585,16 +588,6 @@ async function boot() {
     buildFaceButtons();
     buildMotionButtons();
     buildMorphList();
-
-    // 깨어나기 시험 칸
-    const wm = document.getElementById('wakeMs');
-    const wv = document.getElementById('wakeMsVal');
-    const now = (ENTITY.behavior && ENTITY.behavior.wake_surprise_ms) || 300;
-
-    document.getElementById('wakeNow').textContent = now + 'ms';
-    wm.value = now;
-    wv.textContent = now;
-    wm.oninput = () => { wv.textContent = wm.value; };
 
     statusBox.innerHTML =
         `<span class="ok">두 벌 겹침 완료</span><br>`
@@ -1070,6 +1063,53 @@ function animate() {
 
     controls.update();
     renderer.render(scene, camera);
+}
+
+VrmPick.mount({
+    second: true,
+    onOpen: (url, name, which) => {
+        if (which === 'body') { chosen.body = url; }
+        else if (url.indexOf('blob:') === 0) { chosen.dress = url; }
+        else { chosen.dress = null; chosen.body = null; }
+
+        // 겹치기는 두 파일이 맞물려 있어서 부분만 갈아 끼우기 어렵다.
+        // 장면을 비우고 처음부터 다시 여는 편이 확실하다.
+        rebootWith();
+    },
+});
+
+// 고른 파일을 들고 다시 연다.
+//
+// 파일은 브라우저 안에만 있어서 새로고침하면 사라진다. 그래서
+// 화면을 새로 여는 대신 장면만 비우고 boot 을 다시 부른다.
+async function rebootWith() {
+    [dressVRM, bodyVRM].forEach(v => {
+        if (!v) return;
+        scene.remove(v.scene);
+        v.scene.traverse(o => {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) {
+                (Array.isArray(o.material) ? o.material : [o.material])
+                    .forEach(m => m && m.dispose());
+            }
+        });
+    });
+
+    dressVRM = null;
+    bodyVRM = null;
+
+    baseFaces.length = 0;
+    specialFaces.length = 0;
+    Object.keys(PARTS).forEach(k => { PARTS[k].length = 0; });
+
+    loading.style.display = '';
+
+    try {
+        await boot();
+    } catch (e) {
+        loading.textContent = '불러오지 못했다 — ' + e;
+        console.error(e);
+    }
 }
 
 boot().then(animate).catch(e => {

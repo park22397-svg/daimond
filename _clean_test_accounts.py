@@ -13,6 +13,10 @@
 #
 #   python _clean_test_accounts.py alice bob      -- 그 아이디만 지운다
 #   python _clean_test_accounts.py --list         -- 누가 있는지만 본다
+#   python _clean_test_accounts.py --local ...    -- 내 컴퓨터 쪽을 본다
+#
+# 그냥 부르면 **올린 데**를 본다(.env.local 의 토큰을 읽으므로).
+# 내 컴퓨터의 계정을 지우려면 --local 을 붙인다.
 #
 # 기억 파일(memory/u_<아이디>.json)은 건드리지 않는다. 같은 아이디로
 # 다시 만들면 그 기억이 다시 붙는다.
@@ -24,9 +28,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 # .env.local 에 저장소 토큰이 들어 있다. 그것을 넣어야 올린 데를 본다.
+#
+# --local 이면 안 넣는다. 안 그러면 늘 올린 데만 보게 되어
+# 내 컴퓨터의 계정은 영영 못 지운다(실제로 한 번 헛돌았다).
+LOCAL = "--local" in sys.argv
+
+if LOCAL:
+    sys.argv = [a for a in sys.argv if a != "--local"]
+
 env = os.path.join(HERE, ".env.local")
 
-if os.path.exists(env):
+if not LOCAL and os.path.exists(env):
     for line in open(env, encoding="utf-8"):
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:

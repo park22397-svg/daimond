@@ -2,6 +2,7 @@
 # main.py
 # diamondAI - Flask 서버 메인 실행 파일
 
+import json
 import os
 import secrets
 from datetime import timedelta
@@ -16,7 +17,9 @@ from flask import (
 )
 
 import accounts
+import config
 import memory_manager
+import store
 import who
 from ai_brain import extract_expression, process_chat
 from avatar import AVATAR
@@ -27,6 +30,24 @@ from memory_manager import (
 
 
 app = Flask(__name__)
+
+
+def _stage_now(affinity, before=None):
+    """지금 어떤 사이인가. **말투까지 정해진 것으로** 돌려준다.
+
+    단계 표에는 친구부터 '반말' 이라 적혀 있지만, 말은 누군가 놓자고
+    하고 상대가 받아야 놓는 것이다. 아직이면 존댓말로 되돌린다.
+
+    말투를 보는 자리가 열두 군데라 여기 한 곳을 지나게 한다 —
+    한 군데만 빠뜨려도 거기서만 반말이 튀어나온다.
+    """
+
+    st = AVATAR.next_stage(affinity, before)
+
+    friends = bool((memory_manager.load_relationship() or {}).get("friends"))
+
+    return AVATAR.speaking_stage(st, friends)
+
 
 
 # ============================================================
@@ -93,6 +114,7 @@ app.permanent_session_lifetime = timedelta(days=30)
 # 로그인 화면 자체와, 로그인하려고 부르는 것들.
 # 여기 빠진 것은 전부 막힌다 — 새 API 를 만들 때 따로 챙길 일이 없다.
 OPEN_PATHS = {
+    "/api/health",
     "/login",
     "/api/login",
     "/api/signup",
@@ -127,6 +149,12 @@ def _bind_user():
         slot = None
 
     who.set_current(slot)
+
+    # 이번 요청 동안 읽은 것을 담아 둘 자리를 연다.
+    #
+    # **반드시 요청마다** — 안 열고 지나가면 앞 요청의 값이 남아
+    # 남의 기억을 읽는다. who.set_current 와 같은 자리에 둔 이유다.
+    store.begin_request()
 
     if user:
         return None
@@ -165,6 +193,74 @@ def login_page():
         legacy=memory_manager.legacy_summary(),
         need_code=bool(os.environ.get("SIGNUP_CODE", "").strip()),
     )
+
+
+@app.after_request
+def _save_changes(response):
+    """이번 요청에서 바뀐 것을 실제로 적는다.
+
+    teardown 이 아니라 여기서 한다 — teardown 은 답을 이미 보낸 뒤에
+    돌 수 있어서, 올린 데에서는 그때 기계가 멈춰 있을 수 있다.
+    """
+
+    try:
+        store.flush()
+    except Exception as e:
+        print("[저장 실패]", e)
+
+    return response
+
+
+@app.teardown_request
+def _unbind_user(exc=None):
+    """요청이 끝나면 담아 둔 것을 버린다.
+
+    스레드는 다시 쓰이므로 두고 가면 다음 사람이 그것을 읽는다.
+    """
+
+    store.end_request()
+
+
+@app.route("/api/health")
+def health_api():
+    """올린 것이 제대로 실렸는지.
+
+    아바타 파일이 짐에서 조용히 빠지는 일이 있었다. 빌드 캐시를 쓰는
+    배포에서 static/ 이 통째로 안 실렸는데, 화면은 멀쩡히 뜨고
+    **다이아만 없었다.** 눈으로는 로그인해서 들어가 봐야 알 수 있다.
+    그래서 파일이 있는지만 알려 주는 자리를 둔다.
+
+    파일 내용은 안 준다. 있는지 없는지만 말한다.
+    """
+
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    def has(rel):
+        return os.path.exists(os.path.join(here, rel))
+
+    # 어느 판이 올라와 있는가.
+    #
+    # 종료 코드만 믿으면 안 된다. 올라갔는데 실패라고 하기도 하고,
+    # 빌드 캐시 때문에 아바타가 빠졌는데 성공이라고 하기도 한다.
+    # 올리기 전에 적어 둔 표를 그대로 돌려주면, 올린 쪽이 방금 그것이
+    # 맞는지 눈으로 확인할 수 있다.
+    build = None
+
+    try:
+        with open(os.path.join(here, "build.json"), encoding="utf-8") as f:
+            build = json.load(f).get("stamp")
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "build": build,
+        "avatar": has("static/avatar.vrm"),
+        "body": has("static/body.vrm"),
+        "store": store.backend(),
+        "model_set": bool((store.read_json(config.RUNTIME_KEY) or {})
+                          .get("ollama_url")),
+    })
 
 
 @app.route("/api/whoami")
@@ -343,6 +439,7 @@ def chat_api():
             user_text,
             seeing=(data.get("seeing") or None),
             cut_off=bool(data.get("cut_off")),
+            woke=bool(data.get("woke")),
         )
 
         return jsonify(
@@ -586,7 +683,7 @@ def relationship_api():
             AVATAR.relationship.get("start_affinity", 0)
         )
 
-        stage = AVATAR.next_stage(
+        stage = _stage_now(
             affinity,
             saved.get("stage")
         )
@@ -692,7 +789,7 @@ def touch_api():
             AVATAR.relationship.get("start_affinity", 0)
         )
 
-        stage = AVATAR.next_stage(
+        stage = _stage_now(
             affinity,
             saved.get("stage")
         )
@@ -906,7 +1003,7 @@ def touch_api():
                 lover=lover,
             )
 
-        stage = AVATAR.next_stage(affinity, before)
+        stage = _stage_now(affinity, before)
 
         try:
             save_relationship(affinity, stage.key, devotion_raw,
@@ -987,7 +1084,7 @@ def memory_archive_api():
 
         name, count = archive_memory()
 
-        stage = AVATAR.next_stage(
+        stage = _stage_now(
             AVATAR.relationship.get("start_affinity", 0)
         )
 
@@ -1047,7 +1144,7 @@ def memory_restore_api():
             "affinity",
             AVATAR.relationship.get("start_affinity", 0)
         )
-        stage = AVATAR.next_stage(affinity, saved.get("stage"))
+        stage = _stage_now(affinity, saved.get("stage"))
 
         print(f"[기억 꺼냄]: {name} ({count}개)")
 
@@ -1115,7 +1212,7 @@ def rps_api():
             AVATAR.relationship.get("start_affinity", 0)
         )
 
-        stage = AVATAR.next_stage(
+        stage = _stage_now(
             affinity,
             saved.get("stage")
         )
@@ -1142,12 +1239,14 @@ def rps_api():
             stage,
         )
 
-        stage = AVATAR.next_stage(affinity, before)
+        stage = _stage_now(affinity, before)
 
         try:
             save_relationship(affinity, stage.key)
         except Exception as e:
             print(f"[가위바위보 관계 저장 오류]: {e}")
+
+        _rps_tally(result.get("result"))
 
         # 놀았다는 사실이 대화에도 남아야 다음 말이 이어진다
         if result["reply"]:
@@ -1214,10 +1313,44 @@ def first_talk_api():
             AVATAR.relationship.get("start_affinity", 0)
         )
 
-        stage = AVATAR.next_stage(
+        stage = _stage_now(
             affinity,
             saved.get("stage")
         )
+
+        # 말 놓자고 먼저 꺼낸다.
+        #
+        # 호감은 친구 자리에 닿았는데 아직 서로 존댓말이면, 사람이
+        # 먼저 말해 주기를 마냥 기다리지 않는다. 한 번 물어본다.
+        # 받아들이는 것은 상대 몫이라 여기서 친구가 되지는 않는다.
+        if (not saved.get("friends")
+                and AVATAR.befriend_accepts(stage)
+                and not saved.get("asked_friend")):
+
+            ask = AVATAR.befriend_ask(stage)
+
+            if ask.get("line"):
+                d = memory_manager.load_memory_data()
+                d["relationship"] = dict(d.get("relationship") or {},
+                                         asked_friend=True)
+                memory_manager.save_memory_data(d)
+
+                try:
+                    append_message("assistant", ask["line"])
+                except Exception as e:
+                    print(f"[친구 묻기 저장 오류]: {e}")
+
+                print("[친구]: 먼저 물었습니다.")
+
+                return jsonify({
+                    "speak": True,
+                    "reply": ask["line"],
+                    "expression": ask.get("expression") or "fluster",
+                    "motion": ask.get("motion"),
+                    "cues": [],
+                    "stage": stage.key,
+                    "label": stage.label,
+                })
 
         # 대답이 없어도 말을 멈추지 않는 단계에서는 정해둔 문장을 쓰지 않는다.
         # 그때그때 생각해서 말한다. 그래야 "안녕" 에 답이 없을 때
@@ -1519,8 +1652,10 @@ def suggest_api():
             return jsonify({"ok": True, "items": []})
 
         saved = load_relationship() or {}
-        stage = AVATAR.stage(saved.get("stage")) or AVATAR.stage_for_affinity(
-            saved.get("affinity", 0))
+        stage = AVATAR.speaking_stage(
+            AVATAR.stage(saved.get("stage"))
+            or AVATAR.stage_for_affinity(saved.get("affinity", 0)),
+            bool(saved.get("friends")))
 
         count = int(conf.get("count", 4))
 
@@ -1683,7 +1818,7 @@ def relationship_reset_api():
         target = AVATAR.clamp_affinity(target)
 
         before = load_relationship() or {}
-        stage = AVATAR.next_stage(target, None)
+        stage = _stage_now(target, None)
 
         # 순종은 상한을 넘어 넘친 호감이 쌓인 것이다.
         # 호감을 처음으로 돌리면서 이것만 남기면 앞뒤가 안 맞는다.
@@ -1746,7 +1881,7 @@ def undress_api():
         saved = load_relationship() or {}
         affinity = saved.get(
             "affinity", AVATAR.relationship.get("start_affinity", 0))
-        stage = AVATAR.next_stage(affinity, saved.get("stage"))
+        stage = _stage_now(affinity, saved.get("stage"))
 
         zone = AVATAR.touch_zone(zone_key)
         need = (zone.allow_from if zone and zone.allow_from is not None else 0)
@@ -2051,6 +2186,577 @@ def background_api():
 # 운영 화면(/)은 건드리지 않는다.
 # 통합된 개체를 시험하는 자리는 여기로 분리한다.
 # ============================================================
+
+# ============================================================
+# 체스
+#
+# 규칙은 python-chess, 무엇을 둘지는 chess_play, 무슨 말을 할지는
+# 개체(AVATAR)가 정한다. 여기는 그 셋을 잇고 판을 기억해 둔다.
+#
+# 판은 사람마다 따로다. 기억과 같은 자리에 넣는다 — 그래야 계정이
+# 갈리면 판도 같이 갈리고, 창을 닫았다 열어도 두던 판이 남는다.
+# ============================================================
+
+def _chess_load():
+    """이 사람의 체스 상태. 아무것도 없으면 None.
+
+    **판(fen)이 있어야만 돌려주면 안 된다.** 선공을 가위바위보로
+    정하는 동안은 아직 판이 없고 `deciding` 만 있는데, 그때
+    None 을 돌려주면 자기 상태를 못 읽어 "정하는 중이 아니다" 라고
+    한다. 실제로 그랬다.
+
+    판이 필요한 쪽은 _chess_board() 가 따로 본다.
+    """
+
+    g = memory_manager.load_memory_data().get("chess")
+
+    if not isinstance(g, dict) or not g:
+        return None
+
+    return g
+
+
+def _chess_save(board, dia_color, level=None):
+    data = memory_manager.load_memory_data()
+
+    before = data.get("chess") or {}
+
+    data["chess"] = {
+        "fen": board.fen(),
+        "dia": "white" if dia_color else "black",
+        "moves": [m.uci() for m in board.move_stack],
+        # 난이도는 판과 함께 남는다. 안 적으면 창을 닫았다 열 때마다
+        # 기본으로 돌아가 버린다.
+        "level": level or before.get("level")
+                 or AVATAR.chess().get("level", "normal"),
+    }
+
+    memory_manager.save_memory_data(data)
+
+
+def _chess_level_key():
+    """이 사람이 고른 난이도."""
+
+    g = _chess_load() or {}
+
+    return g.get("level") or AVATAR.chess().get("level", "normal")
+
+
+def _chess_pick(board):
+    """지금 난이도로 다이아가 둘 수를 고른다."""
+
+    import chess_play
+
+    lv = AVATAR.chess_level(_chess_level_key())
+
+    return chess_play.choose(
+        board,
+        depth=int(lv.get("depth", 3)),
+        blunder=float(lv.get("blunder", 0.0)),
+        mercy=AVATAR.chess_mercy(
+            memory_manager.load_relationship().get("affinity", 0)),
+    )
+
+
+def _chess_clear():
+    data = memory_manager.load_memory_data()
+    data["chess"] = {}
+    memory_manager.save_memory_data(data)
+
+
+def _chess_board():
+    """저장해 둔 판을 되살린다. 반환: (board, dia_color) 또는 (None, None)."""
+
+    import chess
+
+    g = _chess_load()
+
+    # 판이 있어야 되살린다. 선공을 정하는 중이면 아직 없다.
+    if not g or not g.get("fen"):
+        return None, None
+
+    try:
+        board = chess.Board(g["fen"])
+    except ValueError as e:
+        print("[체스판 되살리기 실패]:", e)
+        return None, None
+
+    return board, (chess.WHITE if g.get("dia") == "white" else chess.BLACK)
+
+
+def _chess_reply(event, extra=None):
+    """그 일에 대한 다이아의 말과 얼굴. 친밀도도 움직인다."""
+
+    stage = _chess_stage()
+
+    said = AVATAR.chess_say(event, stage) or {}
+
+    if said.get("affinity"):
+        _chess_bump(said["affinity"])
+
+    # 한 말은 대화 기록에도 남긴다.
+    #
+    # 화면에만 띄우고 말면 판이 끝난 뒤 "아까 체스 재밌었어" 라고 해도
+    # 무슨 말인지 모른다. 다이아가 한 말이 기록에 없으니 안 한 것이나
+    # 같다. 놀이도 같이 보낸 시간이다.
+    if said.get("line"):
+        try:
+            memory_manager.append_message("assistant", said["line"])
+        except Exception as e:
+            print("[체스 말 기록 실패]:", e)
+
+    out = {
+        "line": said.get("line"),
+        "expression": said.get("expression"),
+    }
+
+    if extra:
+        out.update(extra)
+
+    return out
+
+
+def _chess_stage():
+    """지금 어떤 사이인지. 말투를 가르는 데 쓴다."""
+
+    rel = memory_manager.load_relationship() or {}
+
+    return AVATAR.speaking_stage(
+        AVATAR.stage_for_affinity(rel.get("affinity", 0)),
+        bool(rel.get("friends")))
+
+
+def _chess_bump(delta):
+    """친밀도를 움직인다. 놀이로 얻는 것은 작게."""
+
+    if not delta:
+        return
+
+    rel = memory_manager.load_relationship()
+
+    aff = AVATAR.clamp_affinity(
+        int(rel.get("affinity", 0)) + int(delta),
+        lover=bool(rel.get("lover", False)),
+        friends=bool(rel.get("friends", False)),
+    )
+
+    stage = AVATAR.stage_for_affinity(aff)
+
+    memory_manager.save_relationship(
+        aff, stage.key if stage else rel.get("stage", "distant"))
+
+
+def _chess_view(board, dia_color, event=None, extra=None):
+    """화면에 돌려줄 것 한 벌."""
+
+    import chess_play
+
+    out = {"ok": True}
+    out.update(chess_play.board_view(board, dia_color))
+
+    out["level"] = _chess_level_key()
+    out["levels"] = [
+        {"key": lv.get("key"), "label": lv.get("label")}
+        for lv in AVATAR.chess_levels()
+    ]
+
+    if event:
+        out.update(_chess_reply(event, extra))
+    elif extra:
+        out.update(extra)
+
+    return out
+
+
+@app.route("/api/chess/state")
+def chess_state_api():
+    """두던 판이 있으면 그것을. 없으면 없다고."""
+
+    board, dia_color = _chess_board()
+
+    if board is None:
+        return jsonify({"ok": True, "playing": False})
+
+    view = _chess_view(board, dia_color)
+    view["playing"] = True
+
+    return jsonify(view)
+
+
+@app.route("/api/chess/new", methods=["POST"])
+def chess_new_api():
+    """새 판을 연다."""
+
+    import chess
+    import chess_play
+
+    data = request.get_json(silent=True) or {}
+
+    # 사람이 어느 쪽을 잡는가.
+    #
+    # 예전에는 다이아 기준으로 받았다(color). 화면에서 "나는 검은 말"
+    # 이라고 고르면 그 반대를 보내야 해서 헷갈린다. **사람 기준**으로
+    # 받는다 — 고르는 사람이 곧 그 사람이니까.
+    #
+    # 안 적어 보내면 두던 것을 그대로. 그것도 없으면 개체가 정한 값.
+    you = str(data.get("you") or "").lower()
+
+    if you not in ("white", "black"):
+        g = _chess_load() or {}
+        was = g.get("dia")
+
+        if was in ("white", "black"):
+            you = "black" if was == "white" else "white"
+        else:
+            you = "black" if AVATAR.chess().get(
+                "dia_color", "black") == "white" else "white"
+
+    dia_color = chess.BLACK if you == "white" else chess.WHITE
+
+    board = chess.Board()
+
+    # 난이도. 안 적어 보내면 두던 것을 그대로 쓴다.
+    level = str(data.get("level") or _chess_level_key())
+
+    _chess_save(board, dia_color, level)
+
+    view_extra = {}
+
+    # 다이아가 흰 쪽이면 먼저 한 수 둔다
+    if board.turn == dia_color:
+        move, _ = _chess_pick(board)
+
+        if move:
+            board.push(move)
+            view_extra["dia_move"] = move.uci()
+
+    _chess_save(board, dia_color, level)
+
+    view = _chess_view(board, dia_color, "start", view_extra)
+    view["playing"] = True
+
+    return jsonify(view)
+
+
+@app.route("/api/chess/move", methods=["POST"])
+def chess_move_api():
+    """사람이 한 수 두면, 받아서 두고 다이아도 둔다."""
+
+    import chess
+    import chess_play
+
+    data = request.get_json(silent=True) or {}
+    uci = str(data.get("move") or "").strip()
+
+    board, dia_color = _chess_board()
+
+    if board is None:
+        return jsonify({"ok": False, "error": "두던 판이 없습니다."})
+
+    if board.turn == dia_color:
+        return jsonify({"ok": False, "error": "지금은 다이아 차례입니다."})
+
+    # 승격을 안 적었으면 퀸으로 친다.
+    #
+    # 화면에서 폰을 8행에 놓으면 e7e8 만 온다. 그대로는 못 두는 수다.
+    try:
+        move = chess.Move.from_uci(uci)
+    except ValueError:
+        return jsonify({"ok": False, "error": "그렇게는 못 둡니다."})
+
+    if move not in board.legal_moves:
+        promoted = chess.Move(move.from_square, move.to_square,
+                              promotion=chess.QUEEN)
+        if promoted in board.legal_moves:
+            move = promoted
+        else:
+            return jsonify({"ok": False, "error": "그렇게는 못 둡니다."})
+
+    # 사람이 다이아 말을 잡았나. **두기 전에** 물어야 한다 —
+    # 두고 나면 그 자리에 이미 사람 말이 서 있다.
+    dia_lost = board.is_capture(move)
+
+    board.push(move)
+
+    events = []
+
+    if board.is_game_over():
+        _chess_save(board, dia_color)
+        return jsonify(_chess_view(board, dia_color,
+                                   _chess_over_event(board, dia_color)))
+
+    if board.is_check():
+        events.append("check_taken")
+
+    # 다이아가 둔다
+    move2, _ = _chess_pick(board)
+
+    took = False
+    extra = {"you_move": move.uci()}
+
+    if move2 is not None:
+        took = board.is_capture(move2)
+        board.push(move2)
+        extra["dia_move"] = move2.uci()
+
+    _chess_save(board, dia_color)
+
+    # 무슨 일이 가장 할 말이 많은가. 판이 끝난 것 > 장군 > 잡기.
+    if board.is_game_over():
+        event = _chess_over_event(board, dia_color)
+    elif board.is_check():
+        event = "check_given"
+    elif took:
+        event = "took"
+    elif dia_lost:
+        event = "lost"
+    elif events:
+        event = events[0]
+    else:
+        event = None
+
+    return jsonify(_chess_view(board, dia_color, event, extra))
+
+
+def _chess_over_event(board, dia_color):
+    """판이 끝났다면 어떤 끝인가.
+
+    무승부를 한 덩어리로 두면 안 된다. **이기고 있던 쪽이 가장
+    억울해하는 끝이 스테일메이트**인데, 그냥 "비겼어요" 라고만 하면
+    놀이가 고장 난 줄 안다 — 실제로 그런 말을 들었다.
+    왜 비겼는지가 말에 드러나야 한다.
+    """
+
+    if board.is_checkmate():
+        # 둘 차례인 쪽이 졌다
+        return "lose" if board.turn == dia_color else "win"
+
+    if board.is_stalemate():
+        return "draw_stalemate"
+
+    if board.is_insufficient_material():
+        return "draw_material"
+
+    if board.is_seventyfive_moves() or board.is_fivefold_repetition():
+        return "draw_long"
+
+    return "draw"
+
+
+def _rps_tally(result):
+    """가위바위보 한 판을 전적에 더한다.
+
+    놀아 놓고 다음 대화에서 모르면 같이 논 것이 아니다.
+    result 는 다이아 기준이다(win = 다이아가 이겼다).
+    """
+
+    if result not in ("win", "lose", "draw"):
+        return
+
+    d = memory_manager.load_memory_data()
+
+    t = dict(d.get("rps") or {})
+    t[result] = int(t.get(result, 0)) + 1
+    t["last"] = result
+
+    d["rps"] = t
+    memory_manager.save_memory_data(d)
+
+
+
+@app.route("/api/chess/start", methods=["POST"])
+def chess_start_api():
+    """판을 열기 전에 선공부터 가위바위보로 정한다.
+
+    바로 판을 열지 않는다. 여기서는 '가위바위보로 정하자' 고 말만 하고,
+    실제 판은 손을 낸 뒤(/api/chess/rps)에 열린다.
+    """
+
+    _chess_clear()
+
+    stage = _chess_stage()
+
+    d = memory_manager.load_memory_data()
+    d["chess"] = {
+        "deciding": True,
+        "level": (d.get("chess") or {}).get("level")
+                 or AVATAR.chess().get("level", "normal"),
+    }
+    memory_manager.save_memory_data(d)
+
+    said = AVATAR.chess_first_say("ask", stage)
+
+    if said.get("line"):
+        try:
+            memory_manager.append_message("assistant", said["line"])
+        except Exception as e:
+            print("[선공 정하기 기록 실패]:", e)
+
+    return jsonify({
+        "ok": True,
+        "playing": False,
+        "deciding": True,
+        "hands": AVATAR.rps_hands(),
+        "line": said.get("line"),
+        "expression": said.get("expression"),
+    })
+
+
+@app.route("/api/chess/rps", methods=["POST"])
+def chess_rps_api():
+    """선공을 가리는 가위바위보 한 판.
+
+    이긴 사람이 고른다.
+      다이아가 이기면  자기가 선공(흰 말)을 가져가고 판이 바로 열린다.
+      사람이 이기면    고르라고 하고 기다린다.
+      비기면           다시 낸다.
+    """
+
+    data = request.get_json(silent=True) or {}
+
+    g = _chess_load() or {}
+
+    if not g.get("deciding"):
+        return jsonify({"ok": False, "error": "선공을 정하는 중이 아닙니다."})
+
+    saved = memory_manager.load_relationship() or {}
+    affinity = saved.get("affinity",
+                         AVATAR.relationship.get("start_affinity", 0))
+    stage = _stage_now(affinity, saved.get("stage"))
+
+    result = AVATAR.rps_play(data.get("hand"), stage=stage, affinity=affinity)
+
+    if result is None:
+        return jsonify({"ok": False, "error": "가위바위보에 없는 손입니다."})
+
+    _rps_tally(result.get("result"))
+
+    # 놀았다는 사실은 남긴다. 선공을 가리는 판도 같이 논 것이다.
+    try:
+        memory_manager.append_message(
+            "user",
+            f"(선공 가위바위보 - 나는 {result['you_label']}, "
+            f"다이아는 {result['mine_label']})")
+    except Exception as e:
+        print("[선공 가위바위보 기록 실패]:", e)
+
+    out = {
+        "ok": True,
+        "deciding": True,
+        "playing": False,
+        "hands": AVATAR.rps_hands(),
+        "you_hand": result.get("you"),
+        "dia_hand": result.get("mine"),
+        "you_label": result.get("you_label"),
+        "dia_label": result.get("mine_label"),
+        # result 는 다이아 기준이다. win 이면 다이아가 이겼다.
+        "result": result.get("result"),
+    }
+
+    # 이 판의 승패로만 가른다. 친밀도는 안 건드린다 -
+    # 선공을 정하는 것이지 놀이로 사이가 오가는 자리가 아니다.
+    if result.get("result") == "draw":
+        said = AVATAR.chess_first_say("tie", stage)
+        out.update(line=said.get("line"), expression=said.get("expression"))
+
+    elif result.get("result") == "win":
+        # 다이아가 이겼다. 선공을 가져간다 = 다이아가 흰 쪽.
+        said = AVATAR.chess_first_say("dia_won", stage)
+        out.update(line=said.get("line"), expression=said.get("expression"))
+
+        view = _chess_open("black", g.get("level"))
+        view["line"] = said.get("line")
+        view["expression"] = said.get("expression")
+        view["deciding"] = False
+        out = view
+
+    else:
+        # 사람이 이겼다. 고르라고 하고 기다린다.
+        said = AVATAR.chess_first_say("you_won", stage)
+        out.update(line=said.get("line"), expression=said.get("expression"),
+                   choose=True)
+
+        d = memory_manager.load_memory_data()
+        d["chess"] = dict(g, deciding=True, choose=True)
+        memory_manager.save_memory_data(d)
+
+    if out.get("line"):
+        try:
+            memory_manager.append_message("assistant", out["line"])
+        except Exception as e:
+            print("[선공 가위바위보 기록 실패]:", e)
+
+    return jsonify(out)
+
+
+def _chess_open(you, level=None):
+    """실제로 판을 연다. 사람이 잡는 쪽을 받는다."""
+
+    import chess
+
+    dia_color = chess.BLACK if you == "white" else chess.WHITE
+
+    board = chess.Board()
+
+    level = level or _chess_level_key()
+
+    _chess_save(board, dia_color, level)
+
+    extra = {}
+
+    if board.turn == dia_color:
+        move, _ = _chess_pick(board)
+
+        if move:
+            board.push(move)
+            extra["dia_move"] = move.uci()
+
+    _chess_save(board, dia_color, level)
+
+    view = _chess_view(board, dia_color, None, extra)
+    view["playing"] = True
+    view["deciding"] = False
+
+    return view
+
+
+@app.route("/api/chess/level", methods=["POST"])
+def chess_level_api():
+    """난이도를 바꾼다. 두던 판은 그대로 두고 다음 수부터 달라진다."""
+
+    data = request.get_json(silent=True) or {}
+
+    want = str(data.get("level") or "").strip()
+
+    lv = AVATAR.chess_level(want)
+
+    board, dia_color = _chess_board()
+
+    if board is None:
+        # 판이 없으면 다음에 열 때 쓰도록 적어만 둔다
+        d = memory_manager.load_memory_data()
+        d["chess"] = dict(d.get("chess") or {}, level=lv["key"])
+        memory_manager.save_memory_data(d)
+
+        return jsonify({"ok": True, "playing": False, "level": lv["key"]})
+
+    _chess_save(board, dia_color, lv["key"])
+
+    return jsonify(_chess_view(board, dia_color))
+
+
+@app.route("/api/chess/resign", methods=["POST"])
+def chess_resign_api():
+    """그만둔다."""
+
+    _chess_clear()
+
+    return jsonify({
+        "ok": True,
+        "playing": False,
+        **_chess_reply("resign"),
+    })
+
 
 @app.route("/test")
 def test_page():

@@ -147,6 +147,28 @@ with app.test_client() as c:
 
 
 print()
+print("담아 두기가 요청마다 비워지는가")
+
+# 한 요청 안에서 같은 기억을 아홉 번 읽던 것을 한 번으로 줄였다.
+# 담아 두는 대신 **요청마다 비워야** 한다 - 안 비우면 스레드가 다시
+# 쓰일 때 앞사람의 기억을 읽는다. 그것이 새면 계정을 나눈 뜻이 없다.
+with app.test_client() as c:
+    c.post("/api/login", json={"id": "alice", "password": "pw1234"})
+    n1 = len(_msgs(c.get("/api/history").get_json()))
+
+with app.test_client() as c:
+    c.post("/api/login", json={"id": "bob", "password": "pw5678"})
+    n2 = len(_msgs(c.get("/api/history").get_json()))
+
+with app.test_client() as c:
+    c.post("/api/login", json={"id": "alice", "password": "pw1234"})
+    n3 = len(_msgs(c.get("/api/history").get_json()))
+
+ok(n1 > 0 and n2 == 0 and n3 == n1,
+   "번갈아 들어와도 남의 기억이 안 보인다", (n1, n2, n3))
+
+
+print()
 print("기억 파일")
 
 files = sorted(os.listdir(os.path.join(SANDBOX, "memory")))

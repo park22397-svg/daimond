@@ -23,8 +23,83 @@
 import json
 import os
 import tempfile
+import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+# ============================================================
+# 한 요청 안에서는 한 번만 읽는다
+#
+# 대화 한 번에 같은 기억 파일을 **아홉 번** 읽고 있었다. 여러 함수가
+# 저마다 load_memory_data() 를 부르기 때문이다. 내 컴퓨터에서는 파일
+# 읽기라 공짜지만, 올린 데서는 아홉 번이 다 네트워크다. 그래서 올린
+# 쪽이 1.5~2배 느렸다.
+#
+# 요청 하나는 한 사람의 것이고 한 스레드가 맡는다. 그동안 같은 열쇠의
+# 값이 바뀌는 것은 우리가 쓸 때뿐이므로, 읽은 것을 담아 두고 쓸 때
+# 갈아 끼우면 된다.
+#
+# **요청마다 반드시 비울 것.** 안 비우면 스레드가 다시 쓰일 때
+# 앞사람의 기억을 읽는다 — who 와 똑같은 함정이다.
+# ============================================================
+
+_req = threading.local()
+
+
+def begin_request():
+    """이번 요청 동안 담아 둘 자리를 연다. before_request 에서 부른다."""
+
+    _req.cache = {}
+    _req.dirty = set()
+
+
+def flush():
+    """이번 요청에서 바뀐 것을 실제로 적는다. after_request 에서 부른다.
+
+    한 요청에 같은 기억 파일을 **네 번** 쓰고 있었다(말 넣기, 시각
+    적기, 사이 저장, 기분 저장). 내 컴퓨터에서는 파일 쓰기라 공짜지만
+    올린 데서는 네 번이 다 네트워크다. 마지막 것만 적으면 된다 —
+    앞의 세 번은 어차피 덮인다.
+    """
+
+    box = _cache()
+    dirty = getattr(_req, "dirty", None)
+
+    if not box or not dirty:
+        return 0
+
+    n = 0
+
+    for key in list(dirty):
+        data = box.get(key)
+
+        if data is None:
+            continue
+
+        try:
+            if _TOKEN:
+                _blob_write(key, data)
+            else:
+                _file_write(key, data)
+            n += 1
+        except Exception as e:
+            print("[저장 실패]", key, e)
+
+    dirty.clear()
+
+    return n
+
+
+def end_request():
+    """담아 둔 것을 버린다."""
+
+    _req.cache = None
+    _req.dirty = None
+
+
+def _cache():
+    return getattr(_req, "cache", None)
 
 # Vercel Blob 을 쓸 때 앞에 붙이는 이름.
 # 한 저장소를 여러 곳이 나눠 쓸 때 섞이지 않게.
@@ -245,14 +320,35 @@ def _blob_list(prefix):
 # ============================================================
 
 def read(key):
-    """없으면 None."""
+    """없으면 None. 이번 요청에서 이미 읽었으면 그것을 그대로 준다."""
 
-    return _blob_read(key) if _TOKEN else _file_read(key)
+    box = _cache()
+
+    if box is not None and key in box:
+        return box[key]
+
+    got = _blob_read(key) if _TOKEN else _file_read(key)
+
+    if box is not None:
+        box[key] = got
+
+    return got
 
 
 def write(key, data):
     if isinstance(data, str):
         data = data.encode("utf-8")
+
+    box = _cache()
+
+    # 요청 안에서는 적어 두기만 하고 실제로 쓰는 것은 끝에 한 번.
+    #
+    # 바로 뒤에 읽으면 담아 둔 이것이 나오므로 아무도 못 알아챈다.
+    # 요청 밖(검사 스크립트 등)에서는 담아 둘 자리가 없으니 바로 쓴다.
+    if box is not None:
+        box[key] = data
+        _req.dirty.add(key)
+        return
 
     if _TOKEN:
         _blob_write(key, data)
@@ -261,6 +357,12 @@ def write(key, data):
 
 
 def delete(key):
+    box = _cache()
+
+    if box is not None:
+        box.pop(key, None)
+        getattr(_req, "dirty", set()).discard(key)
+
     return _blob_delete(key) if _TOKEN else _file_delete(key)
 
 

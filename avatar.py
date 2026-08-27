@@ -907,6 +907,256 @@ class VirtualAvatar:
             if any(p in b for p in parts)
         }
 
+    # --------------------------------------------------------
+    # 체스
+    #
+    # 규칙은 python-chess 가, 무엇을 둘지는 chess_play 가 정한다.
+    # 여기는 다이아가 무슨 얼굴로 무슨 말을 하는지만 정한다.
+    # --------------------------------------------------------
+
+    def chess(self):
+        return self.game.get("chess", {})
+
+    def chess_depth(self):
+        return int(self.chess().get("depth", 3))
+
+    def chess_levels(self):
+        return self.chess().get("levels", [])
+
+    def chess_level(self, key=None):
+        """그 난이도의 값. 모르는 이름이면 기본 난이도를 준다."""
+
+        want = str(key or self.chess().get("level", "normal"))
+
+        levels = self.chess_levels()
+
+        for lv in levels:
+            if lv.get("key") == want:
+                return dict(lv)
+
+        # 모르는 이름이 오면 정해 둔 기본으로. 그것도 없으면 첫 번째.
+        base = str(self.chess().get("level", "normal"))
+
+        for lv in levels:
+            if lv.get("key") == base:
+                return dict(lv)
+
+        return dict(levels[0]) if levels else {
+            "key": "normal", "label": "보통",
+            "depth": self.chess_depth(), "blunder": 0.0,
+        }
+
+    def chess_mercy(self, affinity=0):
+        """사이가 깊으면 가끔 봐준다. 가위바위보와 같은 결이다."""
+
+        c = self.chess()
+
+        if affinity < c.get("mercy_from", 80):
+            return 0.0
+
+        return float(c.get("mercy_chance", 0.0))
+
+    def woke_note(self):
+        """상대가 나를 깨웠다는 것을 한 줄로.
+
+        서버는 다이아가 자고 있었는지 몰랐다. 그래서 깨우면 시간만 보고
+        **자기가 상대를 깨운 줄 알고 사과했다.** 누가 누구를 깨웠는지는
+        추측할 것이 아니라 알려 줄 것이다.
+        """
+
+        return (
+            "너는 자고 있었고 상대가 방금 깨웠다. "
+            "잠결이라 말이 느리거나 엉킬 수는 있다. "
+            "**네가 상대를 깨운 것이 아니다** — 깨워서 미안하다는 말은 하지 마라. "
+            "반가워하든 부스스하든 지금 사이에 맞게 답하라."
+        )
+
+    def rps_note(self, tally):
+        """가위바위보를 얼마나 했고 어땠는지 한 줄로. 없으면 None.
+
+        판 상태(chess_note)와 같은 결이다. 무슨 말을 하라고는 적지
+        않고 상황만 준다.
+
+        놀아 놓고 다음 대화에서 모르면 같이 논 것이 아니다.
+        """
+
+        if not isinstance(tally, dict):
+            return None
+
+        win = int(tally.get("win", 0))     # 다이아가 이긴 수
+        lose = int(tally.get("lose", 0))   # 다이아가 진 수
+        draw = int(tally.get("draw", 0))
+
+        total = win + lose + draw
+
+        if total <= 0:
+            return None
+
+        bits = ["상대와 가위바위보를 %d판 했다." % total]
+        bits.append("네가 %d번 이기고 %d번 졌다." % (win, lose))
+
+        if draw:
+            bits.append("%d번은 비겼다." % draw)
+
+        if win > lose + 2:
+            bits.append("네가 많이 이겼다.")
+        elif lose > win + 2:
+            bits.append("네가 많이 졌다.")
+
+        last = tally.get("last")
+
+        if last in ("win", "lose", "draw"):
+            bits.append({"win": "방금 판은 네가 이겼다.",
+                         "lose": "방금 판은 네가 졌다.",
+                         "draw": "방금 판은 비겼다."}[last])
+
+        return " ".join(bits)
+
+    def chess_note(self, game, board=None):
+        """지금 체스판이 어떤지를 한 줄로. 둘 판이 없으면 None.
+
+        무슨 말을 하라고는 적지 않는다. 상황만 준다 — 시간을 알려 주는
+        것(time_note)과 같은 결이다. 사이에 맞는 말은 단계가 정한다.
+
+        game  : 저장해 둔 판 (fen, dia, level)
+        board : 이미 되살린 판이 있으면 그것. 없으면 fen 으로 만든다.
+        """
+
+        if not game or not game.get("fen"):
+            return None
+
+        try:
+            import chess
+        except ImportError:
+            return None
+
+        if board is None:
+            try:
+                board = chess.Board(game["fen"])
+            except ValueError:
+                return None
+
+        dia_white = game.get("dia") == "white"
+        dia_color = chess.WHITE if dia_white else chess.BLACK
+
+        bits = ["상대와 체스를 두는 중이다."]
+
+        bits.append("너는 %s 쪽이다." % ("흰" if dia_white else "검은"))
+
+        lv = self.chess_level(game.get("level"))
+        if lv:
+            bits.append("난이도는 '%s'." % lv.get("label"))
+
+        # 말이 얼마나 남았는가로 누가 앞서는지 어림한다.
+        #
+        # 점수를 그대로 주면 "제가 3.5점 앞서고 있어요" 같은 말이 나온다.
+        # 사람은 그렇게 말하지 않는다. 앞서는지 밀리는지만 알려 준다.
+        mine = self._chess_material(board, dia_color)
+        yours = self._chess_material(board, not dia_color)
+
+        gap = mine - yours
+
+        if gap >= 3:
+            bits.append("말은 네가 앞선다.")
+        elif gap <= -3:
+            bits.append("말은 상대가 앞선다.")
+        else:
+            bits.append("말은 엇비슷하다.")
+
+        if board.is_checkmate():
+            lost = board.turn == dia_color
+            bits.append("방금 " + ("네가 졌다." if lost else "네가 이겼다."))
+        elif board.is_game_over():
+            bits.append("비긴 채로 끝났다.")
+        elif board.is_check():
+            mine_turn = board.turn == dia_color
+            bits.append("지금 " + ("네가 장군을 맞았다." if mine_turn
+                                  else "상대가 장군을 맞았다."))
+        else:
+            bits.append(("네 차례다." if board.turn == dia_color
+                         else "상대 차례다."))
+
+        bits.append("%d수째." % board.fullmove_number)
+
+        return " ".join(bits)
+
+    def _chess_material(self, board, color):
+        """그쪽 말을 다 합친 값. 누가 앞서는지 어림하는 데만 쓴다."""
+
+        import chess
+
+        worth = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+                 chess.ROOK: 5, chess.QUEEN: 9}
+
+        return sum(len(board.pieces(k, color)) * v for k, v in worth.items())
+
+
+    def chess_first_say(self, key, stage=None, rng=None):
+        """선공 정하기에서 하는 말.
+
+        key: ask / tie / dia_won / you_won
+        """
+
+        import random as _random
+
+        rng = rng or _random
+
+        conf = self.chess().get("first_move", {}).get(key, {})
+        lines = conf.get("lines", {})
+
+        tone = "polite" if self._polite(stage) else "casual"
+        pool = lines.get(tone) or lines.get("polite") or []
+
+        return {
+            "line": rng.choice(list(pool)) if pool else None,
+            "expression": conf.get("expression"),
+        }
+
+    def chess_say(self, event, stage=None, rng=None):
+        """그 일이 났을 때 무슨 얼굴로 뭐라고 하는가.
+
+        매번 말하지는 않는다. 한 수 둘 때마다 떠들면 시끄럽다.
+        말하지 않기로 하면 line 이 None 이다.
+
+        반환: {"line", "expression", "affinity"} / 모르는 일이면 None
+        """
+
+        import random as _random
+
+        rng = rng or _random
+
+        ev = self.chess().get("events", {}).get(event)
+
+        if not ev:
+            return None
+
+        out = {
+            "expression": ev.get("expression"),
+            "affinity": int(ev.get("affinity", 0)),
+            "line": None,
+        }
+
+        if rng.random() > float(ev.get("say", 1.0)):
+            return out
+
+        lines = ev.get("lines", {})
+        tone = "polite" if self._polite(stage) else "casual"
+        pool = lines.get(tone) or lines.get("polite") or []
+
+        if pool:
+            out["line"] = rng.choice(list(pool))
+
+        return out
+
+    def _polite(self, stage):
+        """존대로 말할 사이인가.
+
+        가위바위보와 **똑같은 방식**으로 가른다(avatar.py 의 다른 자리들과
+        같은 줄). 여기서만 다르게 재면 두 놀이의 말투가 어긋난다.
+        """
+
+        return stage is None or str(stage.speech).startswith("존댓말")
+
     def rps_play(self, user_key, stage=None, affinity=0):
         """사람이 낸 것을 받아 다이아가 낼 것을 정하고 결과를 돌려준다."""
 
@@ -1304,7 +1554,8 @@ class VirtualAvatar:
         cap = sc.get("max_step", 12)
         return max(-cap, min(cap, delta))
 
-    def apply_delta(self, affinity, delta, stage=None, lover=True):
+    def apply_delta(self, affinity, delta, stage=None, lover=True,
+                    friends=True):
         """친밀도를 옮긴다.
 
         되돌아가지 않는 단계에서는 깎이지 않는다.
@@ -1312,16 +1563,23 @@ class VirtualAvatar:
         """
         if delta < 0 and stage is not None and                 getattr(stage, "never_falls", False):
             delta = 0
-        return self.clamp_affinity(affinity + delta, lover=lover)
+        return self.clamp_affinity(affinity + delta, lover=lover,
+                                   friends=friends)
 
-    def clamp_affinity(self, value, lover=True):
+    def clamp_affinity(self, value, lover=True, friends=True):
         """호감을 눈금 안으로 넣는다.
 
-        연인이 아니면 그보다 낮은 천장에서 멈춘다. 사귀자는 말 없이
-        마음만 더 깊어지는 일은 없기 때문이다.
+        말을 놓기 전에는 친구 자리에서, 연인이 되기 전에는 그보다 높은
+        자리에서 멈춘다. 말도 안 놓았는데 사이만 깊어지거나, 사귀자는
+        말 없이 마음만 더 깊어지는 일은 없기 때문이다.
         """
         sc = self.relationship.get("scoring", {})
         top = sc.get("max", 100)
+
+        if not friends:
+            ceil = self.befriend_ceiling()
+            if ceil is not None:
+                top = min(top, ceil)
 
         if not lover:
             ceil = self.confess_ceiling()
@@ -1329,6 +1587,139 @@ class VirtualAvatar:
                 top = min(top, ceil)
 
         return max(sc.get("min", -100), min(top, int(value)))
+
+
+    # --------------------------------------------------------
+    # 친구가 되기
+    #
+    # 호감이 오르면 저절로 반말이 되던 것을 고쳤다.
+    #
+    # 존댓말로 이야기하다가 어느 순간 갑자기 반말이 나오면 이상하다.
+    # 사람은 그렇게 말을 놓지 않는다 — 누군가 "우리 말 놓자" 하고
+    # 상대가 "그래" 해야 그때부터 놓는다.
+    #
+    # 고백(연인)과 똑같은 얼개다. 다만 이쪽이 먼저 온다.
+    #   친구가 되어야 가까운 사이로 넘어가고,
+    #   연인이 되어야 광기로 넘어간다.
+    # --------------------------------------------------------
+
+    def befriend_conf(self):
+        return self.relationship.get("befriend", {})
+
+    def befriend_ceiling(self):
+        """친구가 되기 전에는 호감이 여기서 멈춘다. 없으면 None."""
+
+        key = self.befriend_conf().get("ceiling_stage")
+
+        if not key:
+            return None
+
+        st = next((x for x in self.stages() if x.key == key), None)
+
+        # 그 단계에 못 들어가게 한 칸 아래에서 멈춘다
+        return None if st is None else st.min_affinity - 1
+
+    def befriend_accepts(self, stage):
+        """지금 '친구하자' 를 받아들일 사이인가.
+
+        숫자가 아니라 지금 어느 사이인가로 본다. 고백과 같은 이유다 —
+        내려오는 길에서 숫자와 단계가 어긋난다.
+        """
+
+        want = self.befriend_conf().get("accept_stage", "friend")
+
+        if stage is None:
+            return False
+
+        order = [s.key for s in self.stages()]
+
+        try:
+            return order.index(stage.key) >= order.index(want)
+        except ValueError:
+            return False
+
+    def is_befriend(self, text):
+        """말 놓자는 제안인가."""
+
+        low = str(text or "").lower()
+
+        return any(w in low for w in self.befriend_conf().get("words", []))
+
+    def befriend_reply(self, ok, stage=None, rng=None):
+        """받아들이거나 미루는 말.
+
+        반환: {"line", "expression", "motion", "affinity"}
+        """
+
+        import random as _random
+
+        rng = rng or _random
+
+        conf = self.befriend_conf().get("accept" if ok else "deny", {})
+
+        lines = conf.get("lines", {})
+        tone = "polite" if (stage is None
+                            or str(stage.speech).startswith("존댓말")) else "casual"
+
+        pool = lines.get(tone) or lines.get("polite") or []
+
+        return {
+            "line": rng.choice(list(pool)) if pool else None,
+            "expression": conf.get("expression"),
+            "motion": conf.get("motion"),
+            "affinity": int(conf.get("affinity", 0)),
+        }
+
+    def befriend_ask(self, stage=None, rng=None):
+        """다이아 쪽에서 먼저 말 놓자고 하는 말.
+
+        호감이 친구 자리에 닿았는데 아직 서로 존댓말일 때 한 번 꺼낸다.
+        """
+
+        import random as _random
+
+        rng = rng or _random
+
+        conf = self.befriend_conf().get("ask", {})
+        lines = conf.get("lines", {})
+
+        pool = lines.get("polite") or []
+
+        return {
+            "line": rng.choice(list(pool)) if pool else None,
+            "expression": conf.get("expression"),
+            "motion": conf.get("motion"),
+        }
+
+    def speaking_stage(self, stage, friends=True):
+        """말투가 정해진 단계를 돌려준다.
+
+        **아직 친구가 아니면 존댓말로 되돌린다.**
+
+        말투를 보는 자리가 열두 군데인데, 거기를 다 고치는 대신
+        단계를 꺼내는 한 곳에서 갈라 준다. 그러면 만지기·가위바위보·
+        체스·프롬프트가 저절로 따라온다 — 한 군데만 빠뜨려도 거기서만
+        반말이 튀어나온다.
+        """
+
+        if stage is None or friends:
+            return stage
+
+        if not str(stage.speech).startswith("반말"):
+            return stage
+
+        polite = self.befriend_conf().get("before_speech")
+
+        if not polite:
+            return stage
+
+        # 원본을 건드리면 안 된다. 개체는 하나뿐이라 다음 사람에게도 남는다.
+        import copy
+
+        out = copy.copy(stage)
+        out.speech = polite
+
+        return out
 
 
     # --------------------------------------------------------
@@ -1427,10 +1818,15 @@ class VirtualAvatar:
         bits = [f"{day}요일 {name} {now.hour}시"]
 
         # 자고 있어야 할 때인가
+        #
+        # '보통은 자고 있을 시각이다' 라고만 적었더니 **누가 자는지**가
+        # 없어서, 모델이 상대가 자고 있다고 읽고 "갑자기 깨워서
+        # 죄송해요" 라고 답한 적이 있다. 깨운 것은 상대인데.
+        # 누구 이야기인지를 밝힌다.
         lo = conf.get("late_from")
         hi = conf.get("late_to")
         if lo is not None and hi is not None and lo <= now.hour < hi:
-            bits.append("보통은 자고 있을 시각이다")
+            bits.append("둘 다 자고 있을 만한 시각이다")
 
         # 얼마 만인가
         if last_talk:
@@ -3351,11 +3747,12 @@ DIA = VirtualAvatar(
         #   보통    : 기쁨 + 기지개. 잠을 털고 이야기를 시작한다.
         #   깊으면  : 기지개까지 켠 뒤 손을 흔들며 반긴다.
         "wake": {
-            # 놀라는 것은 여기까지다.
+            # 깨울 때 놀라는 것은 없앴다.
             #
-            # 사이가 없다시피 하면 누가 깨우는지도 모르니 놀란다.
-            # 조금이라도 정이 들면 깨우는 사람이 누구인지 알아서 안 놀란다.
-            "surprise_upto": 0,
+            # 사이가 얕으면 놀라게 해 뒀었는데, 매번 깨울 때마다 놀란
+            # 얼굴이 스치는 것이 어색했다. 자기를 부르는 사람에게 놀랄
+            # 이유가 없다. 놀람은 부끄러울 때(shy_levels)와 진짜로
+            # 놀랐을 때만 남는다.
 
             # 기지개는 이만큼부터. 친구가 되면 잠을 털며 일어난다.
             "stretch_from": 40,
@@ -3368,11 +3765,6 @@ DIA = VirtualAvatar(
         # 잠드는 시간보다 짧아야 한다. 대답이 없는 동안 말이 이어져야 하므로
         # 2분을 다 기다리면 끊긴 것처럼 보인다.
         "nudge_timeout_sec": 45,
-        # 자다 깰 때 놀란 표정을 얼마나 짧게 스칠지.
-        #
-        # 놀람이 오래 남으면 그 다음 얼굴이 묻힌다. 진짜로 놀란 사람의
-        # 얼굴도 0.3초쯤이면 다음 표정으로 넘어간다.
-        "wake_surprise_ms": 300,
         "lipsync_tick_ms": 100,
         "blink_min_sec": 2.0,
         "blink_max_sec": 6.0,
@@ -4269,6 +4661,100 @@ DIA = VirtualAvatar(
         #
         # 서먹함 이하에서 꺼내면 거절한다. 미워서가 아니라
         # 아직 그 정도가 아니어서다.
+
+        # ----------------------------------------------------
+        # 친구가 되기
+        #
+        # 예전에는 호감이 40 을 넘는 순간 저절로 반말이 됐다.
+        # 존댓말로 이야기하다가 갑자기 말이 놓이니 이상했다 —
+        # 사람은 그렇게 말을 놓지 않는다.
+        #
+        # 이제 누군가 "말 놓자" 하고 상대가 받아야 놓는다.
+        # 고백(연인)과 같은 얼개이고, 이쪽이 먼저 온다.
+        # ----------------------------------------------------
+        "befriend": {
+
+            # 친구가 되기 전에는 여기서 호감이 멈춘다.
+            # 말도 안 놓았는데 사이만 깊어지는 일은 없다.
+            "ceiling_stage": "close",
+
+            # 이 단계부터 말 놓자는 말을 받는다.
+            # 숫자로 안 적는다 — 눈금이 달라져도 뜻이 남게.
+            "accept_stage": "friend",
+
+            # 친구가 되기 전에 쓰는 말투.
+            #
+            # 단계 표에는 친구부터 '반말' 이라고 적혀 있는데, 아직
+            # 말을 안 놓았으면 이 말투로 되돌린다.
+            "before_speech": "존댓말. 편안하지만 아직 말은 놓지 않는다.",
+
+            # 말 놓자는 말로 알아듣는 것.
+            #
+            # '친구' 만 넣으면 "친구가 그러는데" 같은 말도 걸린다.
+            # 제안으로 읽히는 꼴만 넣는다.
+            "words": [
+                "말 놓자", "말놓자", "말 놔", "말놔", "말 편하게",
+                "말 편히", "말 낮춰", "말 낮추",
+                "친구하자", "친구 하자", "친구가 되자", "친구 할래",
+                "친구하실래", "친구 하실래", "친구가 되어",
+                "우리 친구", "반말 하자", "반말하자", "반말로 해",
+                "말 편하게 해", "편하게 말해",
+            ],
+
+            # 받아들일 때
+            "accept": {
+                "expression": "joy",
+                "motion": "nod",
+                "affinity": 12,
+                "lines": {
+                    "polite": [
+                        "네, 좋아요. 그럼… 이제 편하게 할게. 어색하다.",
+                        "좋아요. 말 놓을게요. 아, 아니 놓을게. 이러니까 이상하네.",
+                        "그래요. 그럼 나도 편하게 할게. 이제 친구다.",
+                    ],
+                    # 이미 놓았는데 또 말하면
+                    "casual": [
+                        "이미 놓고 있는데.",
+                        "우리 벌써 친구잖아.",
+                    ],
+                },
+            },
+
+            # 아직 그럴 사이가 아닐 때
+            "deny": {
+                "expression": "fluster",
+                "motion": "shy",
+                "affinity": 0,
+                "lines": {
+                    "polite": [
+                        "아… 아직은 좀 이른 것 같아요.",
+                        "조금만 더 알아가고요. 그때 다시 말해 주세요.",
+                        "음… 지금은 이대로가 편해요.",
+                    ],
+                    "casual": [
+                        "아직은 좀 이른 것 같은데.",
+                        "조금만 더 있다가.",
+                    ],
+                },
+            },
+
+            # 다이아가 먼저 꺼낼 때.
+            #
+            # 호감이 친구 자리에 닿았는데 아직 서로 존댓말이면 한 번 묻는다.
+            # 사람이 먼저 말해 주기를 마냥 기다리지 않는다.
+            "ask": {
+                "expression": "fluster",
+                "motion": "shy",
+                "lines": {
+                    "polite": [
+                        "저기… 우리 이제 말 놓을까요? 계속 존댓말 하니까 좀 멀게 느껴져서요.",
+                        "이런 말 해도 될지 모르겠는데… 말 편하게 해도 될까요?",
+                        "우리 친구 해요. 말도 놓고요. 어때요?",
+                    ],
+                },
+            },
+        },
+
         "confess": {
             # 이 사이가 되기 전에는 여기서 호감이 멈춘다
             "ceiling_stage": "frenzy",
@@ -5163,6 +5649,320 @@ DIA = VirtualAvatar(
                             "또 같은 거 냈네. 신기하다.",
                             "이러다 계속 비기겠는데.",
                         ],
+                    },
+                },
+            },
+        },
+
+        # ----------------------------------------------------
+        # 체스
+        #
+        # 규칙은 python-chess 가, 무엇을 둘지는 chess_play 가 정한다.
+        # 여기는 **다이아가 무슨 얼굴로 무슨 말을 하는가**만 갖는다.
+        #
+        # 가위바위보와 같은 결이다 — 사이가 깊으면 가끔 봐준다.
+        # 다만 티 나게 나쁜 수를 두지는 않는다. 두 번째로 좋은 수다.
+        # ----------------------------------------------------
+        "chess": {
+
+            # 난이도.
+            #
+            # 두 가지로 조절한다 —
+            #   depth   몇 수 앞을 보는가. 크면 세지고 느려진다.
+            #   blunder 이 확률로 한눈을 판다(아무 수나 둔다).
+            #
+            # 깊이만 낮추면 아무리 낮춰도 잘 안 진다. 말을 세는 눈은
+            # 그대로라서 공짜로 주는 법이 없기 때문이다. 사람이 이기려면
+            # 가끔 놓쳐 줘야 한다. 다만 **한 수면 이기는 자리는 안
+            # 놓친다** — 눈앞의 메이트를 못 보는 것은 쉬운 상대가 아니라
+            # 이상한 상대다.
+            "levels": [
+                {"key": "easy", "label": "쉬움",
+                 "depth": 1, "blunder": 0.45},
+                {"key": "normal", "label": "보통",
+                 "depth": 2, "blunder": 0.12},
+                {"key": "hard", "label": "어려움",
+                 "depth": 3, "blunder": 0.0},
+            ],
+
+            "level": "normal",
+
+            # 난이도를 못 찾았을 때 쓰는 값
+            "depth": 3,
+
+            # 사이가 깊으면 가끔 봐준다. 가위바위보와 같은 값.
+            "mercy_from": 80,
+            "mercy_chance": 0.3,
+
+            # 다이아가 잡는 쪽. 사람이 먼저 두게 흰 쪽을 내준다.
+            "dia_color": "black",
+
+            # 대화로 "체스 두자" 하면 모델에게 안 묻고 바로 판을 연다.
+            # 모델을 거치면 답이 길어져 놀이의 박자가 깨진다.
+            "triggers": [
+                "체스", "chess", "장기말", "체스판", "체스 두",
+            ],
+
+            "guide": {
+                "polite": [
+                    "좋아요. 판을 열게요. 흰 쪽부터 두세요.",
+                    "체스요? 그럼 제가 검은 쪽 할게요.",
+                    "할래요. 먼저 두세요.",
+                ],
+                "casual": [
+                    "좋아. 판 열게. 흰 쪽부터 둬.",
+                    "체스? 그럼 나 검은 쪽.",
+                    "하자. 네가 먼저 둬.",
+                ],
+            },
+
+
+            # ----------------------------------------------
+            # 선공 정하기
+            #
+            # 체스는 흰 쪽이 먼저 둔다. 그것을 누가 가져갈지 그냥
+            # 정해 주는 것보다 가위바위보로 가리는 편이 낫다.
+            # 이긴 사람이 고른다.
+            #
+            # 다이아가 하는 말에 괄호를 섞는다. 괄호 안은 소리로
+            # 안 읽고 글자로만 나오므로, 규칙을 알려 주는 말은
+            # 괄호에 넣는 편이 듣기에 깔끔하다.
+            # ----------------------------------------------
+            "first_move": {
+
+                # 판을 열자마자 꺼내는 말
+                "ask": {
+                    "expression": "fun",
+                    "lines": {
+                        "polite": [
+                            "선공은 가위바위보로 정할까요? (가위 바위 보 — 셋 중 하나를 고르세요)",
+                            "먼저 둘 사람을 가위바위보로 정해요. (가위 바위 보 — 아래에서 하나 고르세요)",
+                        ],
+                        "casual": [
+                            "선공은 가위바위보로 정하자. (가위 바위 보 — 셋 중 하나 골라)",
+                            "먼저 둘 사람 가위바위보로 정하자. (가위 바위 보 — 아래에서 하나 골라)",
+                        ],
+                    },
+                },
+
+                # 비겼을 때. 다시 낸다.
+                "tie": {
+                    "expression": "fun",
+                    "lines": {
+                        "polite": [
+                            "같은 걸 냈네요. (다시 — 가위 바위 보)",
+                            "비겼어요. (한 번 더 — 가위 바위 보)",
+                        ],
+                        "casual": [
+                            "같은 거 냈네. (다시 — 가위 바위 보)",
+                            "비겼다. (한 번 더 — 가위 바위 보)",
+                        ],
+                    },
+                },
+
+                # 다이아가 이겼다. 자기가 고른다.
+                "dia_won": {
+                    "expression": "grin",
+                    "lines": {
+                        "polite": [
+                            "제가 이겼어요. 그럼 제가 먼저 둘게요. (다이아 선공)",
+                            "이겼다. 선공은 제가 가져갈게요. (다이아 선공)",
+                        ],
+                        "casual": [
+                            "내가 이겼다. 그럼 내가 먼저 둘게. (다이아 선공)",
+                            "이겼다. 선공은 내가 가져간다. (다이아 선공)",
+                        ],
+                    },
+                },
+
+                # 사람이 이겼다. 고르라고 한다.
+                "you_won": {
+                    "expression": "pout",
+                    "lines": {
+                        "polite": [
+                            "졌네요. 먼저 두실래요, 나중에 두실래요? (흰 말 = 선공)",
+                            "제가 졌어요. 고르세요. (흰 말이 먼저 둡니다)",
+                        ],
+                        "casual": [
+                            "졌네. 먼저 둘래, 나중에 둘래? (흰 말 = 선공)",
+                            "내가 졌다. 골라. (흰 말이 먼저 둬)",
+                        ],
+                    },
+                },
+            },
+
+            # 무슨 일이 있었을 때 무슨 얼굴로 뭐라고 하는가.
+            #
+            # 매번 말하지는 않는다. 한 수 둘 때마다 떠들면 시끄럽다.
+            # say 는 그 일이 생겼을 때 말할 확률이다.
+            "events": {
+
+                "start": {
+                    "expression": "fun", "say": 1.0,
+                    "lines": {
+                        "polite": [
+                            "그럼 시작할게요. 먼저 두세요.",
+                            "판 열었어요. 흰 쪽이 먼저예요.",
+                        ],
+                        "casual": [
+                            "그럼 시작. 먼저 둬.",
+                            "판 열었어. 흰 쪽 먼저야.",
+                        ],
+                    },
+                },
+
+                # 다이아가 잡았다
+                "took": {
+                    "expression": "fun", "say": 0.45, "affinity": 0,
+                    "lines": {
+                        "polite": [
+                            "이건 가져갈게요.",
+                            "여기 비어 있었어요.",
+                            "아, 그건 두면 안 되는 거였어요.",
+                        ],
+                        "casual": [
+                            "이건 가져간다.",
+                            "여기 비어 있었어.",
+                            "아, 그거 두면 안 되는 거였는데.",
+                        ],
+                    },
+                },
+
+                # 다이아 말이 잡혔다
+                "lost": {
+                    "expression": "pout", "say": 0.45,
+                    "lines": {
+                        "polite": [
+                            "어… 그걸 보셨네요.",
+                            "아깝다. 거기 있으면 안 됐는데.",
+                            "잘 두시네요.",
+                        ],
+                        "casual": [
+                            "어… 그걸 봤네.",
+                            "아깝다. 거기 두면 안 되는 거였는데.",
+                            "잘 두네.",
+                        ],
+                    },
+                },
+
+                # 다이아가 장군을 불렀다
+                "check_given": {
+                    "expression": "grin", "say": 1.0,
+                    "lines": {
+                        "polite": ["체크예요.", "장군이에요. 조심하세요."],
+                        "casual": ["체크.", "장군. 조심해."],
+                    },
+                },
+
+                # 다이아가 장군을 당했다
+                "check_taken": {
+                    "expression": "surprised", "say": 1.0,
+                    "lines": {
+                        "polite": ["어, 체크… 잠깐만요.", "아, 이거 봐야겠어요."],
+                        "casual": ["어, 체크… 잠깐만.", "아, 이건 좀 봐야겠는데."],
+                    },
+                },
+
+                "win": {
+                    "expression": "joy", "say": 1.0, "affinity": 2,
+                    "lines": {
+                        "polite": [
+                            "체크메이트. 제가 이겼네요.",
+                            "이겼다… 아, 너무 좋아했나 봐요.",
+                            "한 판 더 하실래요?",
+                        ],
+                        "casual": [
+                            "체크메이트. 내가 이겼다.",
+                            "이겼다… 아, 너무 좋아했나.",
+                            "한 판 더 할래?",
+                        ],
+                    },
+                },
+
+                "lose": {
+                    "expression": "sorrow", "say": 1.0, "affinity": 3,
+                    "lines": {
+                        "polite": [
+                            "졌어요. 잘 두시네요.",
+                            "아… 제가 졌어요. 다시 할래요.",
+                            "졌다. 근데 재밌었어요.",
+                        ],
+                        "casual": [
+                            "졌다. 잘 두네.",
+                            "아… 내가 졌어. 다시 하자.",
+                            "졌네. 근데 재밌었어.",
+                        ],
+                    },
+                },
+
+                # 그냥 비긴 것(같은 자리를 맴돌거나 오래 끌었을 때)
+                "draw": {
+                    "expression": "fun", "say": 1.0, "affinity": 1,
+                    "lines": {
+                        "polite": ["비겼어요.", "무승부네요. 팽팽했어요."],
+                        "casual": ["비겼다.", "무승부네. 팽팽했어."],
+                    },
+                },
+
+                # 스테일메이트.
+                #
+                # 이기고 있던 쪽이 가장 억울해하는 끝이다. 왜 비겼는지
+                # 안 말해 주면 놀이가 고장 난 줄 안다 — 실제로 그랬다.
+                # 규칙을 짚어 주고, 밀리던 쪽은 살았다고 말한다.
+                "draw_stalemate": {
+                    "expression": "surprised", "say": 1.0, "affinity": 1,
+                    "lines": {
+                        "polite": [
+                            "스테일메이트예요. 제가 둘 수 있는 데가 하나도 없어요 — "
+                            "장군이 아닌데 움직일 수 없으면 무승부거든요.",
+                            "어… 제가 갈 데가 없어요. 장군은 아니고요. "
+                            "이러면 비긴 거예요. 아까웠죠?",
+                        ],
+                        "casual": [
+                            "스테일메이트야. 내가 둘 데가 하나도 없어 — "
+                            "장군이 아닌데 못 움직이면 무승부거든.",
+                            "어… 나 갈 데가 없어. 장군은 아니고. "
+                            "이러면 비긴 거야. 아까웠지?",
+                        ],
+                    },
+                },
+
+                # 서로 말이 모자라 이길 수가 없다
+                "draw_material": {
+                    "expression": "sigh_face", "say": 1.0, "affinity": 1,
+                    "lines": {
+                        "polite": [
+                            "말이 모자라서 더는 못 이겨요. 무승부예요.",
+                            "이 말로는 어느 쪽도 못 이겨요. 비긴 걸로 해요.",
+                        ],
+                        "casual": [
+                            "말이 모자라서 더는 못 이겨. 무승부야.",
+                            "이 말로는 어느 쪽도 못 이겨. 비긴 걸로 하자.",
+                        ],
+                    },
+                },
+
+                # 너무 오래 끌었다
+                "draw_long": {
+                    "expression": "sigh_face", "say": 1.0, "affinity": 1,
+                    "lines": {
+                        "polite": [
+                            "너무 오래 끌었네요. 규칙상 무승부예요.",
+                            "같은 자리를 계속 맴돌았어요. 무승부로 끝나요.",
+                        ],
+                        "casual": [
+                            "너무 오래 끌었네. 규칙상 무승부야.",
+                            "같은 자리만 계속 맴돌았어. 무승부로 끝나.",
+                        ],
+                    },
+                },
+
+                # 사람이 그만두겠다고 했다
+                "resign": {
+                    "expression": "pout", "say": 1.0,
+                    "lines": {
+                        "polite": ["벌써 그만두시게요?", "아쉬워요. 다음에 또 해요."],
+                        "casual": ["벌써 그만해?", "아쉽다. 다음에 또 하자."],
                     },
                 },
             },

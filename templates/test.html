@@ -8,6 +8,7 @@
 <script src="https://unpkg.com/three@0.137.0/build/three.min.js"></script>
 <script src="https://unpkg.com/three@0.137.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.js"></script>
+<script src="/static/vrm_pick.js"></script>
 
 <style>
 :root{
@@ -482,21 +483,48 @@ function initThree(){
   window.addEventListener("resize", resize);
   if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
 
-  var loader = new THREE.GLTFLoader();
-  loader.crossOrigin = "anonymous";
-  loader.load(AVATAR.model.vrm, function(gltf){
-    if (THREE.VRMUtils) { try { THREE.VRMUtils.removeUnnecessaryJoints(gltf.scene); } catch(e){} }
-    THREE.VRM.from(gltf).then(function(vrm){
-      currentVRM = vrm;
-      scene.add(vrm.scene);
-      detectSurprised(gltf);
-      collectShapeNames();
-      cacheBones();
-      $("tagVrm").textContent = "VRM 로드 완료"; $("tagVrm").className = "tag ok";
-      playMotion("idle");
-      showExpression("neutral", false);
-    }).catch(vrmFail);
-  }, undefined, vrmFail);
+  // 아무 VRM 이나 열 수 있다. 다른 아바타를 볼 때 쓴다.
+  //
+  // 여기 주소를 박아 두면 다른 아바타를 보려고 static/avatar.vrm 을
+  // 갈아 끼워야 한다. 그러다 원본을 잃는다.
+  function openVRM(url, name){
+    if (currentVRM) {
+      scene.remove(currentVRM.scene);
+      currentVRM.scene.traverse(function(o){
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+          (Array.isArray(o.material) ? o.material : [o.material])
+            .forEach(function(m){ if (m) m.dispose(); });
+        }
+      });
+      currentVRM = null;
+    }
+
+    $("tagVrm").textContent = "VRM 불러오는 중…"; $("tagVrm").className = "tag";
+
+    var loader = new THREE.GLTFLoader();
+    loader.crossOrigin = "anonymous";
+    loader.load(url, function(gltf){
+      if (THREE.VRMUtils) { try { THREE.VRMUtils.removeUnnecessaryJoints(gltf.scene); } catch(e){} }
+      THREE.VRM.from(gltf).then(function(vrm){
+        currentVRM = vrm;
+        scene.add(vrm.scene);
+        detectSurprised(gltf);
+        collectShapeNames();
+        cacheBones();
+        $("tagVrm").textContent = "VRM 로드 완료"; $("tagVrm").className = "tag ok";
+        playMotion("idle");
+        showExpression("neutral", false);
+      }).catch(vrmFail);
+    }, undefined, vrmFail);
+  }
+
+  VrmPick.mount({
+    home: AVATAR.model.vrm,
+    onOpen: function(url, name){ openVRM(url, name); }
+  });
+
+  openVRM(AVATAR.model.vrm, "다이아");
 
   tick();
 }
