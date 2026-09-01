@@ -1978,86 +1978,102 @@ def tts_config_api():
     )
 
 
-@app.route("/api/tts", methods=["POST"])
-def tts_api():
+# ------------------------------------------------------------
+# 만든 소리를 떠 둔다
+#
+# 같은 말을 또 만들 이유가 없다. 그리고 gemini 는 **분당 몇 번**밖에
+# 못 부른다 — 연달아 부르면 429 로 막히고, 그때마다 화면이 브라우저
+# 기본 목소리(기계음)로 내려간다. 실제로 여덟 번 중 일곱 번이 막혔다.
+#
+# 먼저 말 걸기가 특히 그랬다. 그 말들은 정해진 문장 풀에서 나오는데
+# 매번 새로 만들고 있었다. 떠 두면 두 번째부터는 아예 부르지 않는다.
+#
+# 올린 데서는 파일을 쓸 수 없다. 그때는 조용히 지나간다 —
+# 못 떠 두는 것뿐이지 소리가 안 나는 것은 아니다.
+# ------------------------------------------------------------
 
-    from config import (
-        TTS_ENABLED, TTS_PROVIDER, TTS_VOICE,
-        TTS_API_KEY, TTS_MODEL, TTS_STYLE,
-    )
+_VOICE_CACHE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "_voice_cache")
 
-    if not TTS_ENABLED:
-        return jsonify({"ok": False, "error": "목소리가 꺼져 있습니다."}), 400
 
-    data = request.get_json(silent=True) or {}
-    text = str(data.get("text") or "").strip()
+def _voice_cache_path(*bits):
+    """무엇으로 만든 소리인지까지 열쇠에 넣는다.
 
-    if not text:
-        return jsonify({"ok": False, "error": "읽을 말이 없습니다."}), 400
+    목소리나 말투를 바꾸면 떠 둔 것이 안 맞으므로, 그 값들도 같이
+    섞어야 한다. 안 그러면 바꾼 뒤에도 옛 소리가 나온다.
+    """
+    import hashlib
 
-    # ------------------------------------------------------------
-    # Edge 의 읽어주기 목소리
-    #
-    # 키가 필요 없다. mp3 로 바로 오므로 화면은 그대로 틀면 된다.
-    # ------------------------------------------------------------
-    if TTS_PROVIDER == "edge":
-        try:
-            import asyncio
-            import base64
+    key = hashlib.sha1("\u0000".join(str(b) for b in bits)
+                       .encode("utf-8")).hexdigest()
 
-            import edge_tts
+    return os.path.join(_VOICE_CACHE, key + ".json")
 
-            from config import (
-                TTS_EDGE_VOICE, TTS_EDGE_RATE, TTS_EDGE_PITCH,
+
+def _voice_cache_get(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _voice_cache_put(path, payload):
+    try:
+        os.makedirs(_VOICE_CACHE, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except OSError:
+        # 올린 데서는 못 쓴다. 그래도 소리는 이미 만들어졌다.
+        pass
+
+
+def _tts_edge(text):
+    """Edge 의 읽어주기 목소리. mp3 로 바로 온다. 실패하면 None."""
+    try:
+        import asyncio
+        import base64
+
+        import edge_tts
+
+        from config import TTS_EDGE_VOICE, TTS_EDGE_RATE, TTS_EDGE_PITCH
+
+        async def make():
+            c = edge_tts.Communicate(
+                text,
+                TTS_EDGE_VOICE,
+                rate=TTS_EDGE_RATE,
+                pitch=TTS_EDGE_PITCH,
             )
+            buf = b""
+            async for chunk in c.stream():
+                if chunk["type"] == "audio":
+                    buf += chunk["data"]
+            return buf
 
-            async def make():
-                c = edge_tts.Communicate(
-                    text,
-                    TTS_EDGE_VOICE,
-                    rate=TTS_EDGE_RATE,
-                    pitch=TTS_EDGE_PITCH,
-                )
-                buf = b""
-                async for chunk in c.stream():
-                    if chunk["type"] == "audio":
-                        buf += chunk["data"]
-                return buf
+        audio = asyncio.run(make())
 
-            audio = asyncio.run(make())
+        if not audio:
+            raise RuntimeError("소리가 비었다")
 
-            if not audio:
-                raise RuntimeError("소리가 비었다")
+        return {
+            "ok": True,
+            "provider": "edge",
+            "voice": TTS_EDGE_VOICE,
+            "mime": "audio/mpeg",
+            "audio": base64.b64encode(audio).decode("ascii"),
+        }
 
-            return jsonify(
-                {
-                    "ok": True,
-                    "provider": "edge",
-                    "voice": TTS_EDGE_VOICE,
-                    "mime": "audio/mpeg",
-                    "audio": base64.b64encode(audio).decode("ascii"),
-                }
-            )
+    except Exception as e:
+        print(f"[목소리 오류 - edge]: {e}")
+        return None
 
-        except Exception as e:
-            print(f"[목소리 오류 - edge]: {e}")
-            return jsonify(
-                {"ok": False, "fallback": "browser",
-                 "error": "목소리를 만들지 못했습니다."}
-            ), 200
 
-    if TTS_PROVIDER != "gemini" or not TTS_API_KEY:
-        # 화면이 알아서 브라우저 목소리로 읽는다
-        return jsonify(
-            {
-                "ok": False,
-                "fallback": "browser",
-                "error": "서버에서 만들 목소리가 없습니다.",
-            }
-        ), 200
+def _tts_gemini(text):
+    """Gemini 목소리(아케르나르). 막히거나 실패하면 None."""
+    from config import TTS_API_KEY, TTS_MODEL, TTS_STYLE, TTS_VOICE
 
     try:
-        import base64
         import requests as _rq
 
         url = (
@@ -2087,31 +2103,84 @@ def tts_api():
         )
 
         if res.status_code != 200:
-            print(f"[목소리 오류]: HTTP {res.status_code} {res.text[:200]}")
-            return jsonify(
-                {"ok": False, "fallback": "browser",
-                 "error": f"목소리 서버가 {res.status_code} 를 돌려줬습니다."}
-            ), 200
+            # 429 는 분당 할당량이다. 잘못된 것이 아니라 너무 자주 부른 것이다.
+            how = ("분당 할당량을 넘었습니다"
+                   if res.status_code == 429 else res.text[:120])
+            print(f"[목소리]: gemini HTTP {res.status_code} — {how}")
+            return None
 
-        part = (res.json()["candidates"][0]["content"]["parts"][0])
-        audio = part["inlineData"]["data"]
-        mime = part["inlineData"].get("mimeType", "audio/L16;rate=24000")
+        part = res.json()["candidates"][0]["content"]["parts"][0]
 
-        return jsonify(
-            {
-                "ok": True,
-                "provider": "gemini",
-                "voice": TTS_VOICE,
-                "mime": mime,
-                "audio": audio,      # base64
-            }
-        )
+        return {
+            "ok": True,
+            "provider": "gemini",
+            "voice": TTS_VOICE,
+            "mime": part["inlineData"].get("mimeType", "audio/L16;rate=24000"),
+            "audio": part["inlineData"]["data"],
+        }
 
     except Exception as e:
-        print(f"[목소리 오류]: {e}")
-        return jsonify(
-            {"ok": False, "fallback": "browser", "error": "목소리를 만들지 못했습니다."}
-        ), 200
+        print(f"[목소리 오류 - gemini]: {e}")
+        return None
+
+
+@app.route("/api/tts", methods=["POST"])
+def tts_api():
+
+    from config import TTS_ENABLED, TTS_PROVIDER, TTS_VOICE, TTS_API_KEY
+
+    if not TTS_ENABLED:
+        return jsonify({"ok": False, "error": "목소리가 꺼져 있습니다."}), 400
+
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text") or "").strip()
+
+    if not text:
+        return jsonify({"ok": False, "error": "읽을 말이 없습니다."}), 400
+
+    # 떠 둔 것이 있으면 그것을 쓴다. 부르지도 않고 기다리지도 않는다.
+    from config import TTS_EDGE_VOICE, TTS_STYLE
+
+    path = _voice_cache_path(TTS_PROVIDER, TTS_VOICE, TTS_EDGE_VOICE,
+                             TTS_STYLE, text)
+
+    got = _voice_cache_get(path)
+
+    if got:
+        got["cached"] = True
+        return jsonify(got)
+
+    out = None
+
+    # ------------------------------------------------------------
+    # 정해진 목소리 하나만 쓴다. 내려가지 않는다.
+    #
+    # 예전에는 막히면 edge 로, 그것도 안 되면 브라우저 기계음으로
+    # 내려갔다. **그 예비가 실패를 가렸다** — 소리가 나긴 나니까
+    # 어디가 안 되는지 알 수가 없었다.
+    #
+    # 이제는 안 되면 안 되는 대로 둔다. 조용하고, 왜 그런지 적힌다.
+    # 되돌리려면 config 의 TTS_PROVIDER 를 "edge" 로 두면 된다.
+    # ------------------------------------------------------------
+    if TTS_PROVIDER == "gemini" and TTS_API_KEY:
+        out = _tts_gemini(text)
+        why = "gemini 가 소리를 못 만들었습니다 (할당량이거나 오류)"
+
+    elif TTS_PROVIDER == "edge":
+        out = _tts_edge(text)
+        why = "edge 가 소리를 못 만들었습니다"
+
+    else:
+        out = None
+        why = f"쓸 수 있는 목소리가 없습니다 (provider={TTS_PROVIDER})"
+
+    if out is None:
+        print(f"[목소리]: {why} — 이번 말은 조용히 넘어갑니다.")
+        return jsonify({"ok": False, "error": why}), 200
+
+    _voice_cache_put(path, out)
+
+    return jsonify(out)
 
 
 # ============================================================

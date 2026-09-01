@@ -168,9 +168,9 @@ MAX_HISTORY_MESSAGES = 12
 #
 #   "gemini"  — Google Gemini TTS. '아케르나르(Achernar)'가 여기 목소리다.
 #               한국어 억양이 자연스럽고 말투 지시까지 먹는다.
-#               다만 API 키가 있어야 한다.
-#               https://aistudio.google.com 에서 키를 받아
-#               아래 TTS_API_KEY 에 넣으면 그때부터 이쪽을 쓴다.
+#               다만 API 키가 있어야 하고, 말할 때마다 할당량이 나간다.
+#               키는 이 파일이 아니라 옆에 `.gemini_key` 로 둔다.
+#               **열쇠가 있으면 이쪽이 저절로 쓰인다.**
 #
 # naturalreaders.com 은 개발자용 API 가 공개돼 있지 않다.
 # 유료 계정으로 웹에서 듣는 서비스라 이 프로그램에서는 부를 수 없다.
@@ -179,13 +179,54 @@ MAX_HISTORY_MESSAGES = 12
 
 TTS_ENABLED = True
 
-TTS_PROVIDER = "edge"           # "browser" / "edge" / "gemini"
-
 # 아케르나르. gemini 를 쓸 때만 의미가 있다.
 TTS_VOICE = "Achernar"
 
-# 여기에 키를 넣으면 provider 를 "gemini" 로 바꿔 쓸 수 있다.
-TTS_API_KEY = ""
+
+def _gemini_key():
+    """목소리 열쇠를 찾아 온다. 없으면 빈 문자열.
+
+    **이 파일에 직접 적지 않는다.** config.py 는 저장소에 올라간다.
+    `.secret_key` 와 같은 방식으로 옆에 파일로 두고 읽는다 —
+    `.gemini_key` 는 .gitignore 와 .vercelignore 양쪽에서 뺐다.
+
+    올린 데서는 그 파일이 짐에 안 실리므로 환경변수로 준다.
+    """
+    got = os.environ.get("GEMINI_API_KEY", "").strip()
+
+    if got:
+        return got
+
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    try:
+        with open(os.path.join(here, ".gemini_key"), encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+TTS_API_KEY = _gemini_key()
+
+# 어느 것을 쓸지 못 박는 칸.
+#
+# 비워 두면 열쇠가 있을 때 gemini, 없으면 edge 로 저절로 고른다.
+# 여기에 이름을 적으면 그 값이 이긴다.
+#
+# **지금은 "edge" 로 박아 둔다.** gemini 무료 등급이 하루 10번이라
+# 만들면서 쓰기에는 턱없이 모자라다. 열쇠는 그대로 두었으니,
+# 유료로 올리거나 정해진 말을 미리 떠 둔 뒤에 "" 나 "gemini" 로
+# 바꾸면 그때부터 아케르나르가 나온다.
+TTS_PROVIDER_FORCE = os.environ.get("TTS_PROVIDER", "").strip() or "edge"
+
+# 어디서 소리를 만들지.
+#
+# 예전에는 여기에 "edge" 가 박혀 있었다. 그래서 들어 보고 골라 둔
+# Achernar 가 TTS_VOICE 에 적히기만 하고 **한 번도 불리지 않았다** —
+# 그 값은 provider 가 "gemini" 일 때만 쓰이기 때문이다. 열쇠는
+# .gemini_key 에 있었는데 그 파일을 읽는 코드가 없었다.
+TTS_PROVIDER = (TTS_PROVIDER_FORCE
+                or ("gemini" if TTS_API_KEY else "edge"))
 
 TTS_MODEL = "gemini-2.5-flash-preview-tts"
 
