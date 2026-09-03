@@ -201,6 +201,17 @@ def load_memory_data():
     if not isinstance(game_rps, dict):
         game_rps = {}
 
+    # 지금 둘이 있는 곳.
+    #
+    # 체스판·가위바위보와 같은 이유로 여기 적어 둔다. 안 적으면
+    # 저장할 때마다 사라진다 — 이 함수는 아는 항목만 골라 새 dict 를
+    # 만들기 때문이다. 실제로 공원으로 옮겨 놓고 한 마디 하면
+    # 곧바로 원래 배경으로 돌아가 있었다.
+    place = data.get("place", {})
+
+    if not isinstance(place, dict):
+        place = {}
+
     if not isinstance(conversation, list):
         conversation = []
 
@@ -222,6 +233,7 @@ def load_memory_data():
         "session": session,
         "chess": game_chess,
         "rps": game_rps,
+        "place": place,
     }
 
 

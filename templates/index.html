@@ -2554,6 +2554,9 @@
                 backgrounds.list = d.images || [];
                 backgrounds.fit = d.fit;
                 backgrounds.dim = d.dim;
+                // 지난번에 있던 곳. 창을 닫았다 열어도 그 자리다.
+                backgrounds.place = d.place || null;
+                backgrounds.places = d.places || {};
 
                 if (!d.current) {
                     console.log('[diamondAI] ' + d.folder
@@ -2575,6 +2578,32 @@
         }
 
         // 여러 장 넣었을 때 다음 장으로 넘긴다.
+        // 자리를 옮긴다.
+        //
+        // 서버가 place 를 줄 때만 부른다. 화면이 낱말을 보고 스스로
+        // 옮기지 않는다 — 지나가는 말마다 배경이 바뀌면 어지럽다.
+        // 갈 수 있는 곳인지도 서버가 이미 가렸다.
+        function goPlace(place) {
+            if (!place || !place.image || !place.image.url) return;
+
+            backgrounds.place = place.name || null;
+
+            // 목록에서 그 그림의 자리를 찾아 둔다.
+            // 안 그러면 /배경 으로 넘길 때 엉뚱한 데서 이어진다.
+            const at = backgrounds.list
+                .findIndex(i => i.url === place.image.url);
+
+            if (at >= 0) backgrounds.at = at;
+
+            paintBackground(place.image, backgrounds.fit, backgrounds.dim);
+
+            console.log('[diamondAI] 자리를 옮겼다: ' + place.name);
+
+            if (typeof showHint === 'function') {
+                showHint(place.name, 2200);
+            }
+        }
+
         function nextBackground() {
             if (backgrounds.list.length < 2) return null;
             backgrounds.at = (backgrounds.at + 1) % backgrounds.list.length;
@@ -8702,6 +8731,11 @@
                         myLover.yes = data.lover;
                     }
 
+                    // 말하면서 자리를 옮겼으면 배경도 따라간다.
+                    // 말보다 먼저 갈아 낀다 — "공원 좋다" 를 카페에서
+                    // 말하고 나서 배경이 바뀌면 한 박자 어긋난다.
+                    if (data.place) goPlace(data.place);
+
                     // 같이 걷자고 했으면 발이 풀린다. 그만하자면 멈춘다.
                     if (data.walk === 'start') {
                         setWalking(true);
@@ -9013,6 +9047,8 @@
                 if (!res.ok) throw new Error('HTTP ' + res.status);
 
                 const data = await res.json();
+
+                if (data.place) goPlace(data.place);
 
                 // 원수 단계처럼 먼저 걸 말이 없는 사이면 조용히 넘어간다
                 if (data.speak && data.reply) {

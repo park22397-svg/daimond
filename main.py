@@ -442,6 +442,9 @@ def chat_api():
             woke=bool(data.get("woke")),
         )
 
+        # 답에 (배경: 공원) 이 섞여 있으면 실제로 옮긴다
+        result = _apply_place(result)
+
         return jsonify(
             result
         )
@@ -1400,11 +1403,14 @@ def first_talk_api():
         except Exception as e:
             print(f"[먼저 말걸기 저장 오류]: {e}")
 
+        _moved = _apply_place({"cues": cues})
+
         return jsonify(
             {
                 "speak": True,
                 "reply": reply,
-                "cues": cues,
+                "cues": _moved.get("cues", cues),
+                "place": _moved.get("place"),
                 "expression": AVATAR.detect_expression(reply),
                 "stage": stage.key,
                 "label": stage.label,
@@ -2225,6 +2231,20 @@ def background_api():
         for n in names
     ]
 
+    # ------------------------------------------------------------
+    # 장소별로 묶는다
+    #
+    # 파일 이름이 곧 장소 이름이다. 공원_낮.jpg 와 공원_밤.jpg 는
+    # 둘 다 '공원' 이고, 그 곳으로 갈 때 그중 하나가 뽑힌다.
+    #
+    # 목록을 코드에 적지 않는 이유는 배경과 같다 — 파일을 넣고
+    # 새로 고치면 갈 수 있는 곳이 늘어야 한다.
+    # ------------------------------------------------------------
+    places = {}
+
+    for img in images:
+        places.setdefault(AVATAR.place_of_file(img["name"]), []).append(img)
+
     # 꼭 집어 쓰라고 적어 둔 파일이 있으면 그것을 앞으로 옮긴다
     want = conf.get("prefer")
     current = None
@@ -2238,15 +2258,159 @@ def background_api():
             else:
                 print(f"[배경] prefer 로 적은 '{want}' 을(를) 못 찾았습니다.")
 
+    # 지난번에 있던 곳이 있으면 거기서 시작한다.
+    # 창을 닫았다 열었다고 카페에서 갑자기 공원으로 옮겨지면 안 된다.
+    here = None
+
+    try:
+        here = (memory_manager.load_memory_data().get("place") or {}).get("name")
+    except Exception:
+        here = None
+
+    if here and here in places:
+        current = places[here][0]
+
     return jsonify(
         {
             "images": images,
             "current": current,
+            # {"공원": [...], "카페": [...]}
+            "places": {k: v for k, v in sorted(places.items())},
+            "place": here if here in places else (
+                AVATAR.place_of_file(current["name"]) if current else None),
             "fit": conf.get("fit", "cover"),
             "dim": conf.get("dim", 0.0),
             "folder": folder,
         }
     )
+
+
+def _places_now():
+    """지금 갈 수 있는 곳 이름들. 배경 폴더를 그대로 훑는다."""
+    conf = (AVATAR.model or {}).get("background", {}) or {}
+
+    if not AVATAR.places_conf().get("enabled", True):
+        return []
+
+    folder = conf.get("dir", "static/background")
+    types = tuple(t.lower() for t in conf.get(
+        "types", [".png", ".jpg", ".jpeg", ".webp", ".gif"]))
+
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), folder)
+
+    try:
+        names = [f for f in os.listdir(base) if f.lower().endswith(types)]
+    except OSError:
+        return []
+
+    out = []
+
+    for n in names:
+        p = AVATAR.place_of_file(n)
+        if p and p not in out:
+            out.append(p)
+
+    return sorted(out)
+
+
+def _place_here():
+    """지금 있는 곳. 없으면 None."""
+    try:
+        return (memory_manager.load_memory_data().get("place") or {}).get("name")
+    except Exception:
+        return None
+
+
+def _place_go(name):
+    """그 곳으로 옮긴다. 갈 수 없는 곳이면 False.
+
+    기억에 적어 두는 이유: 창을 닫았다 열어도 있던 자리가 남아야
+    한다. 기분·체스판과 같은 자리다.
+    """
+    if not name or name not in _places_now():
+        return False
+
+    data = memory_manager.load_memory_data()
+    data["place"] = {"name": name}
+    memory_manager.save_memory_data(data)
+
+    return True
+
+
+def _place_image(name):
+    """그 곳의 그림 하나. 여러 장이면 그때그때 하나 뽑는다."""
+    import random as _rnd
+    from urllib.parse import quote
+
+    conf = (AVATAR.model or {}).get("background", {}) or {}
+    prefix = conf.get("url_prefix", "/static/background/")
+    folder = conf.get("dir", "static/background")
+    types = tuple(t.lower() for t in conf.get(
+        "types", [".png", ".jpg", ".jpeg", ".webp", ".gif"]))
+
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), folder)
+
+    try:
+        hits = [f for f in sorted(os.listdir(base))
+                if f.lower().endswith(types)
+                and AVATAR.place_of_file(f) == name]
+    except OSError:
+        hits = []
+
+    if not hits:
+        return None
+
+    pick = _rnd.choice(hits)
+
+    return {"name": pick, "url": prefix + quote(pick)}
+
+
+def _apply_place(result):
+    """답에 섞인 장소 표시를 실제로 옮긴다.
+
+    모델이 낸 것을 그대로 믿지 않는다. **갈 수 있는 곳인지 본다** —
+    없는 곳을 적었으면 표시를 버린다. 그래야 말과 화면이 안 어긋난다.
+
+    옮겼으면 result 에 place 를 붙인다. 화면은 그것만 보고 갈아 낀다.
+    """
+    if not isinstance(result, dict):
+        return result
+
+    cues = result.get("cues")
+
+    if not isinstance(cues, list) or not cues:
+        return result
+
+    want = None
+    keep = []
+
+    for c in cues:
+        if isinstance(c, dict) and c.get("type") == "place":
+            want = c.get("key")          # 마지막 것이 이긴다
+            continue
+        keep.append(c)
+
+    if want is None:
+        return result
+
+    result["cues"] = keep
+
+    here = _place_here()
+
+    if want == here:
+        # 이미 그 곳이다. 옮길 것이 없다.
+        return result
+
+    if not _place_go(want):
+        print(f"[장소]: '{want}' 은(는) 갈 수 없는 곳입니다 — 그냥 둡니다.")
+        return result
+
+    img = _place_image(want)
+    result["place"] = {"name": want, "image": img}
+
+    print(f"[장소]: {here or '처음'} -> {want}")
+
+    return result
 
 
 # ============================================================

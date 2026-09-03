@@ -124,6 +124,29 @@ def extract_cues(text):
         m = _BRACKET_RE.match(text, i)
         if m:
             inner = m.group(1).strip()
+
+            # 자리를 옮기는 표시인가 — (배경: 공원)
+            #
+            # 몸짓·얼굴과 달리 이것은 '어디에 있는가' 라서 문장 속
+            # 위치와 상관이 없다. 그래서 at 을 안 적고 따로 모은다.
+            #
+            # 갈 수 없는 곳이면 부르는 쪽에서 버린다. 없는 곳으로
+            # 옮기는 시늉을 하면 말과 화면이 어긋난다.
+            want_place = AVATAR.place_marker(inner)
+
+            if want_place:
+                # at 은 안 쓰지만 적어 둔다. 아래에서 모든 표시의
+                # 자리를 본문 길이에 맞춰 손보는데, 없으면 거기서 터진다.
+                cues.append({
+                    "at": len(out),
+                    "type": "place",
+                    "key": want_place,
+                })
+                i = m.end()
+                while i < n and text[i] == " " and (not out or out[-1] == " "):
+                    i += 1
+                continue
+
             key = motion_map.get(inner)
             if key:
                 cue = {
@@ -763,6 +786,27 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
         # 아이를 가졌다는 것은 몸이 아니라 프롬프트로 드러난다
         pregnant=bool(_rel.get("pregnant", False)),
     )
+    # 있을 수 있는 곳과 지금 있는 곳.
+    #
+    # 목록은 배경 폴더가 정한다 — 파일을 넣으면 갈 수 있는 곳이 는다.
+    # 지금 어디인지도 같이 줘야 한다. 안 주면 공원에 있으면서
+    # "우리 공원 갈까?" 라고 한다.
+    try:
+        import main as _srv
+
+        _block = AVATAR.places_block(_srv._places_now(), _srv._place_here())
+
+        if _block:
+            system_prompt += "\n" + "\n".join(_block)
+
+        _note = AVATAR.place_note(_srv._place_here())
+
+        if _note:
+            system_prompt += "\n\n" + _note
+
+    except Exception as e:
+        print(f"[장소 알려주기 오류]: {e}")
+
     if user_name:
         system_prompt += "\n" + AVATAR.address_block(user_name)
 
