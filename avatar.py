@@ -1804,10 +1804,25 @@ class VirtualAvatar:
         return (self.model or {}).get("background", {}).get("places", {})
 
     def place_of_file(self, name):
-        """파일 이름에서 장소 이름을 뽑는다. 공원_밤.jpg -> 공원"""
+        """파일 이름에서 장소 이름을 뽑는다.
+
+          공원.jpg      -> 공원
+          공원_밤.jpg   -> 공원      (밑줄 앞이 이름)
+          공원 (2).jpg  -> 공원      (윈도우가 붙이는 겹침 번호)
+
+        **겹침 번호를 떼는 이유.** 사진 두 장을 같은 폴더에 넣으면
+        윈도우가 뒤엣것에 ' (2)' 를 저절로 붙인다. 그걸 그대로 두면
+        '공원' 과 '공원 (2)' 라는 딴 곳 둘이 생긴다. 사람은 같은 곳에
+        두 장을 넣은 것인데 화면은 다른 데로 안다.
+        """
         import os as _os
+        import re as _re
 
         stem = _os.path.splitext(str(name))[0]
+
+        # 윈도우가 붙이는 ' (2)' · ' (3)' … 을 뗀다
+        stem = _re.sub(r"\s*\(\d+\)\s*$", "", stem)
+
         split = self.places_conf().get("split", "_")
 
         return (stem.split(split)[0] if split else stem).strip()
