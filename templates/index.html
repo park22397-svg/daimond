@@ -1200,6 +1200,35 @@
         // 올려다보고, 높으면 내려다본다.
         const CAM_Y = 0.49;
 
+        // ------------------------------------------------------------
+        // 다이아를 화면에서 위아래로 옮기는 손잡이 (화면 높이의 비율)
+        //
+        //   0.10  다이아가 화면 높이의 10% 만큼 위로 (아래가 더 보인다)
+        //   0     그대로
+        //  -0.10  아래로
+        //
+        // **LOOK_Y 와 CAM_Y 를 같이 내리는 것으로는 안 된다.**
+        // OrbitControls 는 target 을 옮기면 카메라를 같은 만큼 따라
+        // 옮겨서 상대 위치를 지킨다. 그래서 구도가 그대로다 —
+        // 0.35 까지 내려 찍어 봤는데 픽셀 하나도 안 움직였다.
+        //
+        // 그래서 렌즈를 옮긴다(setViewOffset). 그리는 창을 아래로
+        // 밀면 담기는 것이 위로 올라온다. 각도도 원근도 안 바뀐다.
+        // 사진기의 시프트 렌즈와 같은 것이다.
+        const FRAME_LIFT = 0.10;
+
+        function applyFrameLift() {
+            const w = canvas.clientWidth || 1;
+            const h = canvas.clientHeight || 1;
+
+            if (!FRAME_LIFT) {
+                camera.clearViewOffset();
+                return;
+            }
+
+            camera.setViewOffset(w, h, 0, Math.round(h * FRAME_LIFT), w, h);
+        }
+
         camera.position.set(0.0, CAM_Y, 1.65);
 
         const renderer = new THREE.WebGLRenderer({
@@ -1216,6 +1245,9 @@
         renderer.setPixelRatio(
             Math.min(window.devicePixelRatio, 2)
         );
+
+        // 렌즈를 옮겨 둔다. 카메라를 세운 뒤라야 한다.
+        applyFrameLift();
 
         // 조명 — 한 방향에서만 고르게 비추면 쇄골이나 목선 같은 굴곡이 죽는다.
         // 주광을 비스듬히 세우고 반대편에서 약한 빛을 하나 더 넣어
@@ -9227,6 +9259,10 @@
                 camera.aspect =
                     canvas.clientWidth /
                     canvas.clientHeight;
+
+                // 옮긴 양이 화면 높이의 비율이라 크기가 바뀌면 다시 잡는다.
+                // updateProjectionMatrix 보다 먼저 부른다.
+                applyFrameLift();
 
                 camera.updateProjectionMatrix();
 
