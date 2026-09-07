@@ -42,11 +42,26 @@ def _stage_now(affinity, before=None):
     한 군데만 빠뜨려도 거기서만 반말이 튀어나온다.
     """
 
-    st = AVATAR.next_stage(affinity, before)
+    saved = memory_manager.load_relationship() or {}
+    grants = AVATAR.gate_grants(saved)
 
-    friends = bool((memory_manager.load_relationship() or {}).get("friends"))
+    st = AVATAR.next_stage(affinity, before, grants)
 
-    return AVATAR.speaking_stage(st, friends)
+    # 옛 기억에 '친구' 가 적혀 있는데 말은 안 놓은 짝이 남아 있을 수 있다.
+    return AVATAR.speaking_stage(st, grants.get("friends", False))
+
+
+def _stage_label(stage):
+    """화면에 적을 이름표.
+
+    넘을 수 있는 문턱이 있으면 괄호로 붙는다 — '서먹함(친구 가능)'.
+    안 알려 주면 사람은 그 자리가 열린 줄 모른다. 호감만 오르고
+    이름표는 그대로여서 고장 난 것처럼 보인다.
+    """
+    saved = memory_manager.load_relationship() or {}
+
+    return AVATAR.stage_label(stage, saved.get("affinity", 0),
+                              AVATAR.gate_grants(saved))
 
 
 
@@ -706,7 +721,7 @@ def relationship_api():
             {
                 "affinity": affinity,
                 "stage": stage.key,
-                "label": stage.label,
+                "label": _stage_label(stage),
                 "speech": stage.speech,
                 "attitude": stage.attitude,
                 # 상한을 넘어 쌓인 마음
@@ -1047,7 +1062,7 @@ def touch_api():
                 "bone": bone,
                 "affinity": affinity,
                 "stage": stage.key,
-                "stage_label": stage.label,
+                "stage_label": _stage_label(stage),
                 "changed_from": before if before != stage.key else None,
                 "pregnant": bool(
                     sex_pregnant if sex_pregnant is not None
@@ -1100,7 +1115,7 @@ def memory_archive_api():
                 "messages": count,
                 "affinity": AVATAR.relationship.get("start_affinity", 0),
                 "stage": stage.key,
-                "stage_label": stage.label,
+                "stage_label": _stage_label(stage),
             }
         )
 
@@ -1158,7 +1173,7 @@ def memory_restore_api():
                 "messages": count,
                 "affinity": affinity,
                 "stage": stage.key,
-                "stage_label": stage.label,
+                "stage_label": _stage_label(stage),
             }
         )
 
@@ -1268,7 +1283,7 @@ def rps_api():
                 "ok": True,
                 "affinity": affinity,
                 "stage": stage.key,
-                "stage_label": stage.label,
+                "stage_label": _stage_label(stage),
             }
         )
 
@@ -1327,7 +1342,8 @@ def first_talk_api():
         # 먼저 말해 주기를 마냥 기다리지 않는다. 한 번 물어본다.
         # 받아들이는 것은 상대 몫이라 여기서 친구가 되지는 않는다.
         if (not saved.get("friends")
-                and AVATAR.befriend_accepts(stage)
+                and AVATAR.befriend_accepts(
+                    affinity, AVATAR.gate_grants(saved))
                 and not saved.get("asked_friend")):
 
             ask = AVATAR.befriend_ask(stage)
@@ -1352,7 +1368,7 @@ def first_talk_api():
                     "motion": ask.get("motion"),
                     "cues": [],
                     "stage": stage.key,
-                    "label": stage.label,
+                    "label": _stage_label(stage),
                 })
 
         # 대답이 없어도 말을 멈추지 않는 단계에서는 정해둔 문장을 쓰지 않는다.
@@ -1374,7 +1390,7 @@ def first_talk_api():
                         "unanswered": live["unanswered"],
                         "keeps_talking": True,
                         "stage": stage.key,
-                        "label": stage.label,
+                        "label": _stage_label(stage),
                         "affinity": affinity,
                     }
                 )
@@ -1389,7 +1405,7 @@ def first_talk_api():
                 {
                     "speak": False,
                     "stage": stage.key,
-                    "label": stage.label,
+                    "label": _stage_label(stage),
                 }
             )
 
@@ -1413,7 +1429,7 @@ def first_talk_api():
                 "place": _moved.get("place"),
                 "expression": AVATAR.detect_expression(reply),
                 "stage": stage.key,
-                "label": stage.label,
+                "label": _stage_label(stage),
                 "affinity": affinity,
             }
         )
@@ -1658,9 +1674,10 @@ def suggest_api():
             return jsonify({"ok": True, "items": []})
 
         saved = load_relationship() or {}
+        _g = AVATAR.gate_grants(saved)
         stage = AVATAR.speaking_stage(
             AVATAR.stage(saved.get("stage"))
-            or AVATAR.stage_for_affinity(saved.get("affinity", 0)),
+            or AVATAR.stage_for_affinity(saved.get("affinity", 0), _g),
             bool(saved.get("friends")))
 
         count = int(conf.get("count", 4))
@@ -1839,7 +1856,7 @@ def relationship_reset_api():
                 "ok": True,
                 "affinity": target,
                 "stage": stage.key,
-                "stage_label": stage.label,
+                "stage_label": _stage_label(stage),
                 "before": before.get("affinity"),
                 "before_stage": before.get("stage"),
                 "devotion_cleared": before.get("devotion_raw", 0),
@@ -2554,9 +2571,11 @@ def _chess_stage():
 
     rel = memory_manager.load_relationship() or {}
 
+    grants = AVATAR.gate_grants(rel)
+
     return AVATAR.speaking_stage(
-        AVATAR.stage_for_affinity(rel.get("affinity", 0)),
-        bool(rel.get("friends")))
+        AVATAR.stage_for_affinity(rel.get("affinity", 0), grants),
+        grants.get("friends", False))
 
 
 def _chess_bump(delta):
@@ -2573,7 +2592,7 @@ def _chess_bump(delta):
         friends=bool(rel.get("friends", False)),
     )
 
-    stage = AVATAR.stage_for_affinity(aff)
+    stage = AVATAR.stage_for_affinity(aff, AVATAR.gate_grants(rel))
 
     memory_manager.save_relationship(
         aff, stage.key if stage else rel.get("stage", "distant"))

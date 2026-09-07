@@ -383,7 +383,8 @@ def update_relationship(user_text):
     except Exception as e:
         print(f"[관계 점수 계산 오류]: {e}")
 
-    stage = AVATAR.next_stage(affinity, prev_key)
+    stage = AVATAR.next_stage(affinity, prev_key,
+                              AVATAR.gate_grants(saved))
 
     # 아직 말을 안 놓았으면 존댓말로 되돌린다.
     #
@@ -628,7 +629,8 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
 
             # 이미 놓았으면 받아들이는 쪽으로(그때 대사가 다르다).
             # 아직이면 사이를 본다.
-            _ok = _friends or AVATAR.befriend_accepts(stage)
+            _ok = _friends or AVATAR.befriend_accepts(
+                _aff, AVATAR.gate_grants(_saved))
 
             r = AVATAR.befriend_reply(_ok, stage)
 
@@ -777,7 +779,17 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
 
     _rel = load_relationship() or {}
 
+    # 갈 수 있는 곳은 배경 폴더가 정한다. 파일을 넣으면 곳이 는다.
+    try:
+        import main as _srv
+        _places, _here = _srv._places_now(), _srv._place_here()
+    except Exception as e:
+        print(f"[장소 읽기 오류]: {e}")
+        _places, _here = [], None
+
     system_prompt = AVATAR.system_prompt(
+        places=_places,
+        here=_here,
         stage=stage,
         transition=transition,
         devotion=devotion,
@@ -786,27 +798,6 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
         # 아이를 가졌다는 것은 몸이 아니라 프롬프트로 드러난다
         pregnant=bool(_rel.get("pregnant", False)),
     )
-    # 있을 수 있는 곳과 지금 있는 곳.
-    #
-    # 목록은 배경 폴더가 정한다 — 파일을 넣으면 갈 수 있는 곳이 는다.
-    # 지금 어디인지도 같이 줘야 한다. 안 주면 공원에 있으면서
-    # "우리 공원 갈까?" 라고 한다.
-    try:
-        import main as _srv
-
-        _block = AVATAR.places_block(_srv._places_now(), _srv._place_here())
-
-        if _block:
-            system_prompt += "\n" + "\n".join(_block)
-
-        _note = AVATAR.place_note(_srv._place_here())
-
-        if _note:
-            system_prompt += "\n\n" + _note
-
-    except Exception as e:
-        print(f"[장소 알려주기 오류]: {e}")
-
     if user_name:
         system_prompt += "\n" + AVATAR.address_block(user_name)
 
@@ -878,6 +869,20 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
         messages.append({
             "role": "system",
             "content": f"[지금] {_when}",
+        })
+
+    # 지금 어디에 있는가.
+    #
+    # 시간·기분과 같은 자리에 같은 방식으로 넣는다. 안 주면 공원에
+    # 있으면서 "우리 공원 갈까?" 라고 한다.
+    #
+    # 프롬프트에 이어 붙이지 않는다 — 그러면 말투 지시가 끝에서 밀린다.
+    _wh = AVATAR.place_note(_here)
+
+    if _wh:
+        messages.append({
+            "role": "system",
+            "content": f"[있는 곳] {_wh}",
         })
 
     # 자고 있다가 깨어났는가.
@@ -1115,7 +1120,8 @@ def keep_talking():
     saved = load_relationship() or {}
     affinity = saved.get(
         "affinity", AVATAR.relationship.get("start_affinity", 0))
-    stage = AVATAR.next_stage(affinity, saved.get("stage"))
+    stage = AVATAR.next_stage(affinity, saved.get("stage"),
+                              AVATAR.gate_grants(saved))
 
     try:
         history = load_memory()

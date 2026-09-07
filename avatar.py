@@ -1483,15 +1483,129 @@ class VirtualAvatar:
                 return s
         return None
 
-    def stage_for_affinity(self, affinity):
-        """친밀도 값만으로 단계를 고른다. (경계에서의 흔들림은 고려하지 않음)"""
+    # --------------------------------------------------------
+    # 문턱 — 말을 놓기 · 사귀기
+    #
+    # 호감이 진입선에 닿아도 **저절로 넘어가지 않는다.** 사람이 말을
+    # 꺼내고 다이아가 받아야 넘어간다.
+    #
+    # 예전에는 말투만 존댓말로 되돌렸다. 그러면 이름표는 '친구' 인데
+    # 존댓말을 하는 짝이 나온다 — 화면도 어긋나고, 프롬프트에도
+    # '현재 관계: 친구 / 말투: 존댓말' 이라고 적혀서 모델이 어느 쪽을
+    # 따라야 할지 모른다. 이제 단계 자체가 문턱 아래에 머문다.
+    #
+    # 여는 자리(stage)와 말을 꺼낼 수 있는 자리(accept_stage)가 다르다.
+    # 고백은 친구부터 받지만 그것이 여는 것은 광기다.
+    # --------------------------------------------------------
+
+    GATES = (("befriend", "friends"), ("confess", "lover"))
+
+    def gate_conf(self, name):
+        return self.relationship.get(name, {})
+
+    def gate_of_stage(self, stage_key):
+        """이 단계를 여는 문턱. 없으면 (None, None).
+
+        **호감 천장(ceiling_stage)과는 다른 값이다.** 말을 안 놓으면
+        호감은 가까운 사이 앞(119)에서 멈추지만, 막아야 하는 단계는
+        '친구' 다 — 반말이 시작되는 자리가 거기이기 때문이다.
+        둘을 같은 값으로 쓰면 '친구(친구 가능)' 같은 말이 나온다.
+        """
+        for name, flag in self.GATES:
+            if self.gate_conf(name).get("gate_stage") == stage_key:
+                return name, flag
+        return None, None
+
+    def gate_grants(self, saved=None, **flags):
+        """넘은 문턱만 True 로 모은다."""
+        saved = saved or {}
+        out = {}
+        for _, flag in self.GATES:
+            given = flags.get(flag)
+            out[flag] = bool(saved.get(flag, False)) if given is None else bool(given)
+        return out
+
+    def stage_allowed(self, stage, grants=None):
+        """이 단계에 들어가도 되는가.
+
+        grants 를 안 주면 다 열어 둔다 — 검사와 시험대가 단계를
+        통째로 훑을 때 쓴다.
+        """
+        if stage is None:
+            return False
+        if grants is None:
+            return True
+
+        name, flag = self.gate_of_stage(stage.key)
+
+        if name is None:
+            return True
+
+        return bool(grants.get(flag, False))
+
+    def pending_gate(self, affinity, grants=None):
+        """지금 넘을 수 있게 된 문턱. 없으면 None.
+
+        여는 자리가 아니라 **말을 꺼낼 수 있는 자리**로 잰다.
+        고백은 친구부터 받으므로 호감 40 에서 '(고백 가능)' 이 뜬다.
+        """
+        if not grants:
+            return None
+
+        for name, flag in self.GATES:
+            if grants.get(flag):
+                continue
+
+            conf = self.gate_conf(name)
+            st = self.stage(conf.get("accept_stage"))
+            want = st.min_affinity if st else conf.get("accept_from", 40)
+
+            if affinity < want:
+                continue
+
+            # 앞 문턱을 못 넘었으면 여기도 아직이다.
+            # 말도 안 놓았는데 사귀자는 말은 순서가 아니다.
+            req = conf.get("requires")
+
+            if req and not grants.get(req):
+                continue
+
+            return name
+
+        return None
+
+    def gate_hint(self, name):
+        """괄호 안에 적을 말. '친구 가능' 처럼."""
+        return self.gate_conf(name).get("hint") if name else None
+
+    def stage_label(self, stage, affinity=None, grants=None):
+        """화면과 기록에 쓰는 이름표.
+
+        넘을 수 있는 문턱이 있으면 괄호로 붙인다 — '서먹함(친구 가능)'.
+        안 알려 주면 사람은 그 자리가 열린 줄 모른다.
+        """
+        if stage is None:
+            return ""
+        if affinity is None:
+            return stage.label
+
+        hint = self.gate_hint(self.pending_gate(affinity, grants))
+
+        return "%s(%s)" % (stage.label, hint) if hint else stage.label
+
+    def stage_for_affinity(self, affinity, grants=None):
+        """친밀도 값으로 단계를 고른다.
+
+        문턱을 안 넘은 단계는 건너뛴다. 호감이 아무리 높아도 말을
+        주고받지 않았으면 그 자리에 못 간다.
+        """
         chosen = self.stages()[0]
         for s in self.stages():
-            if affinity >= s.min_affinity:
+            if affinity >= s.min_affinity and self.stage_allowed(s, grants):
                 chosen = s
         return chosen
 
-    def next_stage(self, affinity, current_key=None):
+    def next_stage(self, affinity, current_key=None, grants=None):
         """지금 단계를 유지할지 옮길지 정한다.
 
         경계값을 살짝 넘나드는 것만으로 존댓말과 반말이 계속 뒤집히면
@@ -1507,8 +1621,12 @@ class VirtualAvatar:
         나가는 쪽에만 걸어도 뒤집힘은 그대로 막힌다.
         친구는 40 에서 되고 23 에서 풀리니 그 사이 폭이 완충 구간이다.
         """
-        cand = self.stage_for_affinity(affinity)
+        cand = self.stage_for_affinity(affinity, grants)
         cur = self.stage(current_key) if current_key else None
+
+        # 저장된 단계가 이제는 못 가는 자리면 붙잡고 있을 이유가 없다.
+        if cur is not None and not self.stage_allowed(cur, grants):
+            return cand
 
         if cur is None or cand.key == cur.key:
             return cand
@@ -1619,24 +1737,19 @@ class VirtualAvatar:
         # 그 단계에 못 들어가게 한 칸 아래에서 멈춘다
         return None if st is None else st.min_affinity - 1
 
-    def befriend_accepts(self, stage):
-        """지금 '친구하자' 를 받아들일 사이인가.
+    def befriend_accepts(self, affinity, grants=None):
+        """지금 '말 놓자' 를 받아들일 사이인가.
 
-        숫자가 아니라 지금 어느 사이인가로 본다. 고백과 같은 이유다 —
-        내려오는 길에서 숫자와 단계가 어긋난다.
+        **숫자로 잰다.** 예전에는 단계로 쟀는데, 이제는 문턱을 안 넘으면
+        단계가 그 아래에 머물기 때문에 단계로 재면 영영 못 넘는다 —
+        친구가 되어야 친구가 될 수 있다는 말이 된다. 실제로 이름표는
+        '서먹함(친구 가능)' 인데 "말 놓자" 를 거절했다.
         """
+        conf = self.befriend_conf()
+        st = self.stage(conf.get("accept_stage"))
+        want = st.min_affinity if st else conf.get("accept_from", 40)
 
-        want = self.befriend_conf().get("accept_stage", "friend")
-
-        if stage is None:
-            return False
-
-        order = [s.key for s in self.stages()]
-
-        try:
-            return order.index(stage.key) >= order.index(want)
-        except ValueError:
-            return False
+        return int(affinity) >= want
 
     def is_befriend(self, text):
         """말 놓자는 제안인가."""
@@ -1748,23 +1861,22 @@ class VirtualAvatar:
 
         return conf.get("accept_from", 40)
 
-    def confess_accepts(self, affinity, stage):
+    def confess_accepts(self, affinity, stage=None, grants=None):
         """지금 고백을 받아들일 사이인가.
 
-        숫자가 아니라 **지금 어느 사이인가**로 본다.
-        내려오는 길에서 둘이 어긋나기 때문이다 — 이력현상이 있어서
-        호감 30 이어도 친구에서 내려오는 중이면 아직 친구다.
-        숫자로만 재면 그때 고백을 거절하면서 반말로 답하게 된다.
-        말과 사이가 어긋나는 것이다.
+        **숫자로 잰다.** befriend 와 같은 이유다 — 문턱을 안 넘으면
+        단계가 그 아래에 머물러서, 단계로 재면 못 넘는다.
 
-        단계를 못 받았을 때만 숫자로 대신 잰다.
+        말을 먼저 놓아야 한다(requires). 존댓말로 사귀자는 말은
+        순서가 아니다.
         """
-        want = self.confess_accept_from()
+        conf = self.confess_conf()
+        req = conf.get("requires")
 
-        if stage is None:
-            return affinity >= want
+        if req and grants is not None and not grants.get(req):
+            return False
 
-        return stage.min_affinity >= want
+        return int(affinity) >= self.confess_accept_from()
 
     def confess_ceiling(self):
         """연인이 되기 전에 호감이 멈추는 값. 없으면 None."""
@@ -2021,7 +2133,7 @@ class VirtualAvatar:
         low = str(text or "").lower()
         return any(w in low for w in self.confess_conf().get("words", []))
 
-    def confess_reply(self, affinity, stage, lover):
+    def confess_reply(self, affinity, stage, lover, grants=None):
         """고백을 받았을 때 무엇을 할지.
 
         반환: {"accepted", "reply", "expression", "motion", "affinity"}
@@ -2033,7 +2145,7 @@ class VirtualAvatar:
         if lover:
             spec = conf.get("again", {})
             accepted = None
-        elif self.confess_accepts(affinity, stage):
+        elif self.confess_accepts(affinity, stage, grants):
             spec = conf.get("accept", {})
             accepted = True
         else:
@@ -2350,6 +2462,8 @@ class VirtualAvatar:
         devotion=0,
         mood=0,
         lover=False,
+        places=None,
+        here=None,
         pregnant=False,
     ):
 
@@ -2423,6 +2537,19 @@ class VirtualAvatar:
                 "",
                 self.expression_guide(),
             ]
+
+        # 갈 수 있는 곳.
+        #
+        # 표정·몸짓 표와 같은 성격이라 같은 자리에 둔다 — '네가 할 수
+        # 있는 것' 의 목록이다.
+        #
+        # **말투 지시보다 앞이어야 한다.** 처음에는 프롬프트 뒤에 이어
+        # 붙였는데, 그러면 말투 지시가 끝에서 757자 밀려난다. 모델은
+        # 끝부분을 가장 강하게 따르므로 그만큼 말투가 흔들린다.
+        if places:
+            block = self.places_block(places, here)
+            if block:
+                parts += block
 
         # 말투 지시는 맨 뒤에 둔다.
         # 모델은 프롬프트의 끝부분을 가장 강하게 따르기 때문이다.
@@ -4833,6 +4960,17 @@ DIA = VirtualAvatar(
             # 말도 안 놓았는데 사이만 깊어지는 일은 없다.
             "ceiling_stage": "close",
 
+            # 문턱이 막는 단계.
+            #
+            # 반말이 시작되는 자리다. 여기를 막아야 '친구' 라는 이름표가
+            # 말을 놓은 뒤에만 뜬다. 천장(위)과는 다른 값이다 —
+            # 호감은 가까운 사이 앞까지 오를 수 있지만 이름표는
+            # 서먹함에 머문다.
+            "gate_stage": "friend",
+
+            # 넘을 수 있게 됐을 때 이름표 옆 괄호에 적을 말
+            "hint": "친구 가능",
+
             # 이 단계부터 말 놓자는 말을 받는다.
             # 숫자로 안 적는다 — 눈금이 달라져도 뜻이 남게.
             "accept_stage": "friend",
@@ -4913,6 +5051,15 @@ DIA = VirtualAvatar(
         "confess": {
             # 이 사이가 되기 전에는 여기서 호감이 멈춘다
             "ceiling_stage": "frenzy",
+
+            # 문턱이 막는 단계. 고백을 주고받아야 광기로 넘어간다.
+            "gate_stage": "frenzy",
+
+            # 넘을 수 있게 됐을 때 이름표 옆 괄호에 적을 말
+            "hint": "고백 가능",
+
+            # 말을 먼저 놓아야 한다. 존댓말로 사귀자는 말은 순서가 아니다.
+            "requires": "friends",
 
             # 이 단계부터 고백을 받는다.
             #
