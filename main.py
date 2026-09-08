@@ -2262,21 +2262,16 @@ def background_api():
     for img in images:
         places.setdefault(AVATAR.place_of_file(img["name"]), []).append(img)
 
-    # 꼭 집어 쓰라고 적어 둔 파일이 있으면 그것을 앞으로 옮긴다
-    want = conf.get("prefer")
-    current = None
-
-    if images:
-        current = images[0]
-        if want:
-            hit = next((i for i in images if i["name"] == want), None)
-            if hit:
-                current = hit
-            else:
-                print(f"[배경] prefer 로 적은 '{want}' 을(를) 못 찾았습니다.")
-
-    # 지난번에 있던 곳이 있으면 거기서 시작한다.
-    # 창을 닫았다 열었다고 카페에서 갑자기 공원으로 옮겨지면 안 된다.
+    # 어디서 시작하는가.
+    #
+    # 1. 지난번에 있던 곳이 있으면 거기다. 창을 닫았다 열었다고
+    #    카페에서 갑자기 공원으로 옮겨지면 안 된다.
+    # 2. 없으면 places.start 에 적힌 곳.
+    # 3. 그것도 없으면 **아무 데도 아니다 — 배경을 안 깐다.**
+    #
+    # 예전에는 이름순 첫 번째를 깔았다. 그러면 창을 열자마자 어딘가에
+    # 가 있는 셈이라, 이야기하다가 "공원 가자" 하는 것이 어색해진다.
+    # 아무 데도 아닌 자리에서 시작해 둘이 정한 곳으로 가는 편이 맞다.
     here = None
 
     try:
@@ -2284,8 +2279,30 @@ def background_api():
     except Exception:
         here = None
 
+    current = None
+
     if here and here in places:
         current = places[here][0]
+    else:
+        here = None
+
+        start = AVATAR.places_conf().get("start")
+
+        if start and start in places:
+            current = places[start][0]
+            here = start
+
+    # 꼭 집어 쓰라고 적어 둔 파일이 있으면 그것이 이긴다.
+    # 장소와 상관없이 늘 그 그림으로 시작하고 싶을 때만 쓴다.
+    want = conf.get("prefer")
+
+    if want:
+        hit = next((i for i in images if i["name"] == want), None)
+        if hit:
+            current = hit
+            here = AVATAR.place_of_file(hit["name"])
+        else:
+            print(f"[배경] prefer 로 적은 '{want}' 을(를) 못 찾았습니다.")
 
     return jsonify(
         {
@@ -2293,8 +2310,9 @@ def background_api():
             "current": current,
             # {"공원": [...], "카페": [...]}
             "places": {k: v for k, v in sorted(places.items())},
-            "place": here if here in places else (
-                AVATAR.place_of_file(current["name"]) if current else None),
+            "place": here,
+            # 폴더가 빈 것과 일부러 배경 없이 시작하는 것은 다르다.
+            "empty": not images,
             "fit": conf.get("fit", "cover"),
             "dim": conf.get("dim", 0.0),
             "folder": folder,

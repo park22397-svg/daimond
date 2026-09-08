@@ -2591,8 +2591,16 @@
                 backgrounds.places = d.places || {};
 
                 if (!d.current) {
-                    console.log('[diamondAI] ' + d.folder
-                        + ' 에 배경 이미지가 없습니다. 넣으면 바로 깔립니다.');
+                    // 폴더가 빈 것과 아무 데도 아닌 자리에서 시작하는
+                    // 것은 다르다. 뒤엣것은 고장이 아니다.
+                    paintBackground(null);
+
+                    console.log(d.empty
+                        ? '[diamondAI] ' + d.folder
+                          + ' 에 배경 이미지가 없습니다. 넣으면 바로 깔립니다.'
+                        : '[diamondAI] 아직 아무 데도 아닌 자리에서 시작합니다. '
+                          + '갈 수 있는 곳 '
+                          + Object.keys(d.places || {}).length + '군데');
                     return;
                 }
 
