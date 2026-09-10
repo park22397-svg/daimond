@@ -234,6 +234,37 @@ class Motion:
 # 그 값이 지금 어떤 사이인지와 말투를 결정한다.
 # ============================================================
 
+def _has_jong(word):
+    """마지막 글자에 받침이 있는가."""
+    if not word:
+        return False
+
+    last = word[-1]
+
+    if not ("가" <= last <= "힣"):
+        return False
+
+    return ((ord(last) - 0xAC00) % 28) != 0
+
+
+def _ro_tail(word):
+    """'로' 인가 '으로' 인가. ㄹ 받침은 '로' 를 쓴다 — '연필로'."""
+    if not word:
+        return "로"
+
+    last = word[-1]
+
+    if not ("가" <= last <= "힣"):
+        return "로"
+
+    return "로" if ((ord(last) - 0xAC00) % 28) in (0, 8) else "으로"
+
+
+def _ida_tail(word):
+    """'이다' 인가 '다' 인가."""
+    return "이다" if _has_jong(word) else "다"
+
+
 class Stage:
 
     def __init__(self, key, label, min_affinity, speech, attitude,
@@ -916,6 +947,106 @@ class VirtualAvatar:
 
     def chess(self):
         return self.game.get("chess", {})
+
+    # --------------------------------------------------------
+    # 끝말잇기
+    #
+    # 낱말을 고르는 것은 word_chain.py 다. 여기는 무슨 말을 할지만.
+    # --------------------------------------------------------
+
+    def wc_conf(self):
+        return self.game.get("word_chain", {})
+
+    def wc_levels(self):
+        return self.wc_conf().get("levels", [])
+
+    def wc_level(self, key=None):
+        want = key or self.wc_conf().get("level", "normal")
+
+        for lv in self.wc_levels():
+            if lv.get("key") == want:
+                return lv
+
+        return {"key": "normal", "label": "보통"}
+
+    def wc_mercy(self, affinity=0):
+        """사이가 깊으면 가끔 봐준다. 한방을 쥐고도 안 쓴다."""
+        conf = self.wc_conf()
+
+        if affinity < conf.get("mercy_from", 80):
+            return 0.0
+
+        return float(conf.get("mercy_chance", 0.0))
+
+    def is_word_chain(self, text):
+        """끝말잇기 하자는 말인가."""
+        low = str(text or "").lower()
+
+        return any(w in low for w in self.wc_conf().get("triggers", []))
+
+    def wc_stop(self, text):
+        """그만하자는 말인가."""
+        low = str(text or "").strip()
+
+        return any(w in low for w in self.wc_conf().get("stop_words", []))
+
+    def wc_say(self, kind, stage=None, rng=None, why=None, **fmt):
+        """끝말잇기에서 할 말.
+
+        반환: {"line", "expression", "motion", "affinity"}
+        """
+        import random as _random
+
+        rng = rng or _random
+
+        spec = self.wc_conf().get(kind, {})
+        lines = spec.get("lines", {})
+
+        # 잘못 냈을 때는 까닭마다 다른 말을 한다.
+        # 뭐가 틀렸는지 모르면 같은 실수를 또 한다.
+        if why:
+            lines = lines.get(why) or lines.get("없는말") or {}
+
+        tone = "polite" if self._polite(stage) else "casual"
+        pool = lines.get(tone) or lines.get("polite") or []
+
+        line = rng.choice(list(pool)) if pool else None
+
+        # 받침 따라 조사를 붙인 꼴을 같이 넘긴다.
+        # '과' 으로 / '과일' 다 처럼 나오면 모델이 그 어색함을 따라 쓴다.
+        for key in ("head", "word"):
+            v = fmt.get(key)
+            if v:
+                fmt[key + "_ro"] = "'%s'%s" % (v, _ro_tail(v))
+                fmt[key + "_ida"] = "'%s'%s" % (v, _ida_tail(v))
+
+        if line:
+            try:
+                line = line.format(**fmt)
+            except (KeyError, IndexError):
+                pass
+
+        return {
+            "line": line,
+            "expression": spec.get("expression"),
+            "motion": spec.get("motion"),
+            "affinity": int(spec.get("affinity", 0)),
+        }
+
+    def wc_note(self, game):
+        """끝말잇기 상황을 프롬프트에 한 줄로. 없으면 None.
+
+        체스판과 같은 방식이다 — 무슨 말을 하라고는 안 적고 상황만 준다.
+        안 주면 놀아 놓고 다음 대화에서 모른다.
+        """
+        if not isinstance(game, dict) or not game.get("on"):
+            return None
+
+        used = game.get("used") or []
+        last = game.get("last") or ""
+
+        return (f"둘이 끝말잇기를 하는 중이다. {len(used)}번 주고받았고 "
+                f"지금 낱말은 '{last}'{_ida_tail(last)}.")
 
     def chess_depth(self):
         return int(self.chess().get("depth", 3))
@@ -5975,6 +6106,144 @@ DIA = VirtualAvatar(
         # 가위바위보와 같은 결이다 — 사이가 깊으면 가끔 봐준다.
         # 다만 티 나게 나쁜 수를 두지는 않는다. 두 번째로 좋은 수다.
         # ----------------------------------------------------
+        # ----------------------------------------------------
+        # 끝말잇기
+        #
+        # **규칙은 서버가 쥔다.** 모델에게 맡기면 안 된다 — 재 봤을 때
+        # gemma3:4b 가 0/3 이었다. 없는 낱말을 지어내고, 끝 글자를 안
+        # 맞추고, 이미 쓴 낱말을 또 낸다. 낱말을 고르는 것은
+        # word_chain.py 가 하고, 여기는 무슨 말을 할지만 정한다.
+        #
+        # 판은 대화 안에서 돈다. 체스처럼 창을 따로 열지 않는다 —
+        # 끝말잇기는 원래 말로 주고받는 놀이라 그 편이 맞다.
+        # ----------------------------------------------------
+        "word_chain": {
+
+            # 세기. word_chain.LEVELS 와 같은 열쇠말이다.
+            #
+            #   무름  이어 가기 쉬운 낱말만 낸다. 한방은 안 쓴다
+            #   보통  아무거나
+            #   매움  상대가 막히는 낱말부터 고른다. 한방도 쓴다
+            "levels": [
+                {"key": "soft", "label": "무름"},
+                {"key": "normal", "label": "보통"},
+                {"key": "sharp", "label": "매움"},
+            ],
+
+            "level": "normal",
+
+            # 사이가 깊으면 가끔 봐준다. 한방을 쥐고도 안 쓴다.
+            "mercy_from": 80,
+            "mercy_chance": 0.35,
+
+            # 대화로 "끝말잇기 하자" 하면 모델에게 안 묻고 바로 시작한다.
+            # 모델을 거치면 답이 길어져 놀이의 박자가 깨진다.
+            "triggers": [
+                "끝말잇기", "끝말 잇기", "끝말있기", "말잇기", "말 잇기",
+            ],
+
+            # 그만두자는 말
+            "stop_words": [
+                "그만", "끝", "졌어", "못하겠", "항복", "그만하자",
+                "안 할래", "안할래",
+            ],
+
+            # 시작할 때
+            "open": {
+                "expression": "fun",
+                "lines": {
+                    "polite": [
+                        "좋아요. 제가 먼저 낼게요 — {word}.",
+                        "끝말잇기요? 할게요. {word} 부터요.",
+                        "해요. 제가 먼저요. {word}.",
+                    ],
+                    "casual": [
+                        "좋아. 내가 먼저 낼게 — {word}.",
+                        "끝말잇기? 하자. {word} 부터.",
+                        "그래. 내가 먼저. {word}.",
+                    ],
+                },
+            },
+
+            # 받아치는 말. 낱말만 짧게 낸다 — 놀이는 박자다.
+            "reply": {
+                "expression": "fun",
+                "lines": {
+                    "polite": ["{word}.", "{word}! 이번엔요?", "음… {word}."],
+                    "casual": ["{word}.", "{word}! 자, 네 차례.", "음… {word}."],
+                },
+            },
+
+            # 사람이 잘못 냈을 때. 까닭마다 다르게 말한다 —
+            # 뭐가 틀렸는지 모르면 같은 실수를 또 한다.
+            "wrong": {
+                "expression": "fluster",
+                "lines": {
+                    "안이어짐": {
+                        "polite": ["{head_ro} 시작해야죠.",
+                                   "어… 끝 글자 보세요. {head_ro} 이어야 해요."],
+                        "casual": ["{head_ro} 시작해야지.",
+                                   "어? 끝 글자 봐. {head_ro} 이어야지."],
+                    },
+                    "이미썼음": {
+                        "polite": ["그건 아까 나왔어요.", "이미 쓴 말이에요."],
+                        "casual": ["그건 아까 나왔어.", "이미 쓴 말이야."],
+                    },
+                    "없는말": {
+                        "polite": ["그런 말이 있어요? 저는 모르겠는데요.",
+                                   "음… 제가 아는 말이 아니에요."],
+                        "casual": ["그런 말이 있어? 나는 모르겠는데.",
+                                   "음… 내가 아는 말이 아닌데."],
+                    },
+                    "모양": {
+                        "polite": ["두 글자 넘는 우리말로 해주세요."],
+                        "casual": ["두 글자 넘는 우리말로 해줘."],
+                    },
+                },
+            },
+
+            # 다이아가 낼 말이 없을 때 — 진다
+            "lost": {
+                "expression": "sorrow",
+                "motion": "cover",
+                "affinity": 4,
+                "lines": {
+                    "polite": [
+                        "아… 못 잇겠어요. 제가 졌어요.",
+                        "{head_ro} 시작하는 말이 생각이 안 나요. 졌다.",
+                    ],
+                    "casual": [
+                        "아… 못 잇겠어. 내가 졌다.",
+                        "{head_ro} 시작하는 말이 안 떠올라. 졌어.",
+                    ],
+                },
+            },
+
+            # 사람이 막혔을 때 — 이긴다
+            "won": {
+                "expression": "fun",
+                "motion": "nod",
+                "affinity": 2,
+                "lines": {
+                    "polite": ["제가 이겼네요. 한 판 더 해요?",
+                               "이번엔 제가 이겼어요."],
+                    "casual": ["내가 이겼다. 한 판 더 할래?",
+                               "이번엔 내가 이겼네."],
+                },
+            },
+
+            # 그만둘 때
+            "stop": {
+                "expression": "neutral",
+                "lines": {
+                    "polite": ["네, 그만해요. 재밌었어요.",
+                               "여기까지 해요. {n}번 이었네요."],
+                    "casual": ["그래, 그만하자. 재밌었어.",
+                               "여기까지. {n}번 이었네."],
+                },
+            },
+        },
+
         "chess": {
 
             # 난이도.

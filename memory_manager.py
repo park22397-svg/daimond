@@ -201,6 +201,15 @@ def load_memory_data():
     if not isinstance(game_rps, dict):
         game_rps = {}
 
+    # 두던 끝말잇기.
+    #
+    # 체스판과 같은 이유로 여기 적어 둔다. 안 적으면 저장할 때마다
+    # 사라진다 — 한 낱말 주고받을 때마다 판이 없어진다.
+    chain = data.get("word_chain", {})
+
+    if not isinstance(chain, dict):
+        chain = {}
+
     # 지금 둘이 있는 곳.
     #
     # 체스판·가위바위보와 같은 이유로 여기 적어 둔다. 안 적으면
@@ -234,6 +243,7 @@ def load_memory_data():
         "chess": game_chess,
         "rps": game_rps,
         "place": place,
+        "word_chain": chain,
     }
 
 
