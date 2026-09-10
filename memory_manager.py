@@ -201,6 +201,15 @@ def load_memory_data():
     if not isinstance(game_rps, dict):
         game_rps = {}
 
+    # 두던 오목판.
+    #
+    # 체스판과 같은 이유로 여기 적어 둔다. 안 적으면 한 수 둘 때마다
+    # 판이 사라진다.
+    stones = data.get("gomoku", {})
+
+    if not isinstance(stones, dict):
+        stones = {}
+
     # 두던 끝말잇기.
     #
     # 체스판과 같은 이유로 여기 적어 둔다. 안 적으면 저장할 때마다
@@ -244,6 +253,7 @@ def load_memory_data():
         "rps": game_rps,
         "place": place,
         "word_chain": chain,
+        "gomoku": stones,
     }
 
 

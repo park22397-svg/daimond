@@ -1048,6 +1048,84 @@ class VirtualAvatar:
         return (f"둘이 끝말잇기를 하는 중이다. {len(used)}번 주고받았고 "
                 f"지금 낱말은 '{last}'{_ida_tail(last)}.")
 
+    # --------------------------------------------------------
+    # 오목
+    #
+    # 둘 자리는 gomoku.py 가 정한다. 여기는 무슨 말을 할지만.
+    # --------------------------------------------------------
+
+    def go_conf(self):
+        return self.game.get("gomoku", {})
+
+    def go_levels(self):
+        return self.go_conf().get("levels", [])
+
+    def go_level(self, key=None):
+        want = key or self.go_conf().get("level", "normal")
+
+        for lv in self.go_levels():
+            if lv.get("key") == want:
+                return lv
+
+        return {"key": "normal", "label": "보통"}
+
+    def go_stone(self):
+        """다이아가 잡는 돌."""
+        return self.go_conf().get("dia_stone", "w")
+
+    def go_mercy(self, affinity=0):
+        conf = self.go_conf()
+
+        if affinity < conf.get("mercy_from", 80):
+            return 0.0
+
+        return float(conf.get("mercy_chance", 0.0))
+
+    def is_gomoku(self, text):
+        """오목 두자는 말인가."""
+        low = str(text or "").lower()
+
+        return any(w in low for w in self.go_conf().get("triggers", []))
+
+    def go_say(self, kind, stage=None, rng=None, **fmt):
+        """오목에서 할 말."""
+        import random as _random
+
+        rng = rng or _random
+
+        spec = self.go_conf().get(kind, {})
+        lines = spec.get("lines", {})
+
+        tone = "polite" if self._polite(stage) else "casual"
+        pool = lines.get(tone) or lines.get("polite") or []
+
+        line = rng.choice(list(pool)) if pool else None
+
+        if line:
+            try:
+                line = line.format(**fmt)
+            except (KeyError, IndexError):
+                pass
+
+        return {
+            "line": line,
+            "expression": spec.get("expression"),
+            "motion": spec.get("motion"),
+            "affinity": int(spec.get("affinity", 0)),
+        }
+
+    def go_note(self, game):
+        """오목 상황을 프롬프트에 한 줄로. 체스판과 같은 방식이다."""
+        if not isinstance(game, dict) or not game.get("board"):
+            return None
+
+        n = sum(1 for ch in game["board"] if ch != ".")
+
+        if not n:
+            return "둘이 오목판을 펴 놓았다. 아직 아무도 안 뒀다."
+
+        return f"둘이 오목을 두는 중이다. 돌이 {n}개 놓였다."
+
     def chess_depth(self):
         return int(self.chess().get("depth", 3))
 
@@ -6240,6 +6318,121 @@ DIA = VirtualAvatar(
                                "여기까지 해요. {n}번 이었네요."],
                     "casual": ["그래, 그만하자. 재밌었어.",
                                "여기까지. {n}번 이었네."],
+                },
+            },
+        },
+
+        # ----------------------------------------------------
+        # 오목
+        #
+        # 규칙과 둘 자리는 gomoku.py 가 쥔다. 여기는 무슨 말을 할지.
+        #
+        # 체스처럼 판을 여는 창이 따로 있다. 15x15 라 말로 주고받기에는
+        # 자리 이름이 너무 많다("H8 에 둬" 를 계속 말할 수는 없다).
+        # ----------------------------------------------------
+        "gomoku": {
+
+            # 세기. gomoku.LEVELS 와 같은 열쇠말이다.
+            #
+            # 체스에서 배운 것 — 깊이만 낮추면 아무리 낮춰도 잘 안 진다.
+            # 줄을 세는 눈은 그대로라 공짜로 주는 법이 없기 때문이다.
+            # 그래서 blunder(한눈팔기)로 조절한다. 다만 한 수면 이기는
+            # 자리와 막아야 하는 자리는 어느 세기에서도 안 놓친다.
+            "levels": [
+                {"key": "easy", "label": "쉬움"},
+                {"key": "normal", "label": "보통"},
+                {"key": "hard", "label": "어려움"},
+            ],
+
+            "level": "normal",
+
+            # 사이가 깊으면 가끔 봐준다. 체스·가위바위보와 같은 값.
+            "mercy_from": 80,
+            "mercy_chance": 0.25,
+
+            # 다이아가 잡는 돌. 오목은 먼저 두는 쪽이 유리해서
+            # 사람에게 검은 쪽(선공)을 준다.
+            "dia_stone": "w",
+
+            # 대화로 "오목 두자" 하면 모델에게 안 묻고 바로 판을 연다.
+            "triggers": [
+                "오목", "gomoku", "오목판", "오목 두", "다섯 목",
+            ],
+
+            "open": {
+                "expression": "fun",
+                "lines": {
+                    "polite": [
+                        "좋아요. 판 열게요. 검은 돌이 먼저니까 먼저 두세요.",
+                        "오목이요? 그럼 제가 흰 돌 할게요.",
+                        "해요. 먼저 두세요.",
+                    ],
+                    "casual": [
+                        "좋아. 판 열게. 검은 돌 먼저니까 네가 먼저 둬.",
+                        "오목? 그럼 나 흰 돌.",
+                        "하자. 네가 먼저.",
+                    ],
+                },
+            },
+
+            # 한 수 둘 때마다. 매번 말하면 시끄러우니 짧게.
+            "move": {
+                "expression": "neutral",
+                "lines": {
+                    "polite": ["{spot}.", "음… {spot}.", "여기요, {spot}."],
+                    "casual": ["{spot}.", "음… {spot}.", "여기, {spot}."],
+                },
+            },
+
+            # 상대가 셋을 만들었을 때 — 알아채는 것이 사람 같다
+            "threat": {
+                "expression": "surprised",
+                "lines": {
+                    "polite": ["어… 그건 막아야겠는데요. {spot}.",
+                               "{spot}. 위험했어요."],
+                    "casual": ["어… 그건 막아야지. {spot}.",
+                               "{spot}. 위험했다."],
+                },
+            },
+
+            "won": {
+                "expression": "joy",
+                "motion": "nod",
+                "affinity": 3,
+                "lines": {
+                    "polite": ["{spot}. 다섯이에요, 제가 이겼어요.",
+                               "{spot} — 여기서 다섯. 한 판 더 해요?"],
+                    "casual": ["{spot}. 다섯이다, 내가 이겼어.",
+                               "{spot} — 여기서 다섯. 한 판 더 할래?"],
+                },
+            },
+
+            "lost": {
+                "expression": "sorrow",
+                "motion": "cover",
+                "affinity": 5,
+                "lines": {
+                    "polite": ["아… 다섯이네요. 제가 졌어요.",
+                               "졌다. 언제 그렇게 놓으셨어요?"],
+                    "casual": ["아… 다섯이네. 내가 졌다.",
+                               "졌어. 언제 그렇게 놨어?"],
+                },
+            },
+
+            "draw": {
+                "expression": "neutral",
+                "lines": {
+                    "polite": ["판이 다 찼어요. 비겼네요."],
+                    "casual": ["판이 다 찼다. 비겼네."],
+                },
+            },
+
+            "resign": {
+                "expression": "fun",
+                "affinity": 1,
+                "lines": {
+                    "polite": ["그만두시게요? 알겠어요."],
+                    "casual": ["그만할래? 알겠어."],
                 },
             },
         },

@@ -2207,6 +2207,275 @@ def tts_api():
 
 
 # ============================================================
+# 오목
+#
+# 규칙과 둘 자리는 gomoku.py, 무슨 말을 할지는 개체(AVATAR).
+# 여기는 그 둘을 잇고 판을 기억해 둔다.
+#
+# 판은 사람마다 따로다. 체스와 같은 자리에 넣는다.
+# ============================================================
+
+def _go_load():
+    """이 사람의 오목판. 없으면 None."""
+    g = memory_manager.load_memory_data().get("gomoku")
+
+    if not isinstance(g, dict) or not g.get("board"):
+        return None
+
+    return g
+
+
+def _go_save(board, level=None):
+    data = memory_manager.load_memory_data()
+    before = data.get("gomoku") or {}
+
+    data["gomoku"] = {
+        "board": board,
+        "level": level or before.get("level")
+                 or AVATAR.go_level().get("key", "normal"),
+    }
+
+    memory_manager.save_memory_data(data)
+
+
+def _go_clear():
+    data = memory_manager.load_memory_data()
+    data["gomoku"] = {}
+    memory_manager.save_memory_data(data)
+
+
+def _go_stage():
+    """지금 어떤 사이인지. 말투를 가르는 데 쓴다."""
+    rel = memory_manager.load_relationship() or {}
+    grants = AVATAR.gate_grants(rel)
+
+    return AVATAR.speaking_stage(
+        AVATAR.stage_for_affinity(rel.get("affinity", 0), grants),
+        grants.get("friends", False))
+
+
+def _go_bump(delta):
+    """놀이로 얻는 것은 작게. 체스·가위바위보와 같은 자리."""
+    if not delta:
+        return
+
+    rel = memory_manager.load_relationship() or {}
+    grants = AVATAR.gate_grants(rel)
+
+    aff = AVATAR.clamp_affinity(
+        int(rel.get("affinity", 0)) + int(delta), grants=grants)
+
+    st = AVATAR.stage_for_affinity(aff, grants)
+
+    memory_manager.save_relationship(
+        aff, st.key if st else rel.get("stage", "distant"))
+
+
+def _go_view(board, event=None, spot=None):
+    """화면에 돌려줄 것 한 벌."""
+    import gomoku as GO
+
+    out = GO.view(board, AVATAR.go_stone())
+    out["ok"] = True
+    out["level"] = (_go_load() or {}).get(
+        "level", AVATAR.go_level().get("key", "normal"))
+    out["levels"] = AVATAR.go_levels()
+
+    if event:
+        say = AVATAR.go_say(event, _go_stage(), spot=spot or "")
+        out["reply"] = say.get("line")
+        out["expression"] = say.get("expression")
+        out["motion"] = say.get("motion")
+
+    return out
+
+
+@app.route("/api/gomoku/state")
+def gomoku_state_api():
+    import gomoku as GO
+
+    g = _go_load()
+
+    if not g:
+        return jsonify({"ok": True, "open": False})
+
+    out = _go_view(g["board"])
+    out["open"] = True
+    out["winner"] = GO.winner(g["board"])
+
+    return jsonify(out)
+
+
+@app.route("/api/gomoku/new", methods=["POST"])
+def gomoku_new_api():
+    import gomoku as GO
+
+    try:
+        data = request.get_json(silent=True) or {}
+        level = data.get("level")
+
+        board = GO.new_board()
+        _go_save(board, level)
+
+        print("[오목]: 판을 열었습니다.")
+
+        out = _go_view(board, "open")
+        out["open"] = True
+
+        return jsonify(out)
+
+    except Exception as e:
+        print(f"[오목 새 판 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/gomoku/move", methods=["POST"])
+def gomoku_move_api():
+    """사람이 한 수 두고, 다이아가 받는다."""
+    import gomoku as GO
+
+    try:
+        g = _go_load()
+
+        if not g:
+            return jsonify({"ok": False, "error": "판이 없습니다."}), 400
+
+        board = g["board"]
+        data = request.get_json(silent=True) or {}
+        spot = data.get("spot")
+
+        if not isinstance(spot, int) or not (0 <= spot < GO.SIZE * GO.SIZE):
+            return jsonify({"ok": False, "error": "그런 자리가 없습니다."}), 400
+
+        if board[spot] != GO.EMPTY:
+            return jsonify({"ok": False, "error": "이미 돌이 있습니다."}), 400
+
+        mine = AVATAR.go_stone()
+        yours = GO.other(mine)
+
+        r, c = divmod(spot, GO.SIZE)
+        board = GO.put(board, r, c, yours)
+
+        # 사람이 이겼는가
+        if GO.winner_at(board, r, c) == yours:
+            _go_clear()
+            say = AVATAR.go_say("lost", _go_stage())
+            _go_bump(say.get("affinity", 0))
+
+            out = GO.view(board, mine)
+            out.update({"ok": True, "open": False, "winner": yours,
+                        "reply": say.get("line"),
+                        "expression": say.get("expression"),
+                        "motion": say.get("motion")})
+            print("[오목]: 사람이 이겼습니다.")
+
+            return jsonify(out)
+
+        if GO.is_full(board):
+            _go_clear()
+            say = AVATAR.go_say("draw", _go_stage())
+            out = GO.view(board, mine)
+            out.update({"ok": True, "open": False, "winner": None,
+                        "reply": say.get("line"),
+                        "expression": say.get("expression")})
+
+            return jsonify(out)
+
+        # 다이아가 받는다
+        rel = memory_manager.load_relationship() or {}
+        level = g.get("level") or AVATAR.go_level().get("key", "normal")
+
+        # 사람이 셋을 만들어 놓았는가 — 알아채면 그렇게 말한다
+        before = GO.evaluate(board, mine)
+
+        pick = GO.choose(board, mine, level,
+                         mercy=AVATAR.go_mercy(rel.get("affinity", 0)))
+
+        if pick is None:
+            _go_clear()
+            say = AVATAR.go_say("draw", _go_stage())
+            out = GO.view(board, mine)
+            out.update({"ok": True, "open": False, "reply": say.get("line")})
+
+            return jsonify(out)
+
+        rr, cc = divmod(pick, GO.SIZE)
+        board = GO.put(board, rr, cc, mine)
+        name = GO.name(pick)
+
+        if GO.winner_at(board, rr, cc) == mine:
+            _go_clear()
+            say = AVATAR.go_say("won", _go_stage(), spot=name)
+            _go_bump(say.get("affinity", 0))
+
+            out = GO.view(board, mine)
+            out.update({"ok": True, "open": False, "winner": mine,
+                        "reply": say.get("line"),
+                        "expression": say.get("expression"),
+                        "motion": say.get("motion")})
+            print(f"[오목]: 다이아가 이겼습니다 ({name}).")
+
+            return jsonify(out)
+
+        _go_save(board, g.get("level"))
+
+        # 막느라 둔 수였으면 그렇게 말한다. 알아채는 것이 사람 같다.
+        after = GO.evaluate(board, mine)
+        kind = "threat" if (after - before) > 1500 else "move"
+
+        out = _go_view(board, kind, name)
+        out["open"] = True
+        out["spot"] = pick
+
+        return jsonify(out)
+
+    except Exception as e:
+        print(f"[오목 두기 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/gomoku/level", methods=["POST"])
+def gomoku_level_api():
+    try:
+        data = request.get_json(silent=True) or {}
+        want = str(data.get("level") or "").strip()
+
+        keys = [l.get("key") for l in AVATAR.go_levels()]
+
+        if want not in keys:
+            return jsonify({"ok": False, "error": "그런 세기가 없습니다."}), 400
+
+        g = _go_load()
+
+        if g:
+            _go_save(g["board"], want)
+
+        return jsonify({"ok": True, "level": want})
+
+    except Exception as e:
+        print(f"[오목 세기 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/gomoku/resign", methods=["POST"])
+def gomoku_resign_api():
+    try:
+        _go_clear()
+        say = AVATAR.go_say("resign", _go_stage())
+        _go_bump(say.get("affinity", 0))
+
+        print("[오목]: 그만뒀습니다.")
+
+        return jsonify({"ok": True, "open": False,
+                        "reply": say.get("line"),
+                        "expression": say.get("expression")})
+
+    except Exception as e:
+        print(f"[오목 그만 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+# ============================================================
 # 배경 이미지
 #
 # static/background/ 를 훑어 쓸 수 있는 이미지를 알려준다.
