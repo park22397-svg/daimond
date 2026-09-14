@@ -400,6 +400,107 @@
             color: #fff;
         }
 
+        /* ---------------- 장기 ---------------- */
+
+        #jg-open {
+            padding: 6px 10px;
+            border-radius: 8px;
+            border: 1px solid #3a3f68;
+            background: rgba(30, 34, 58, 0.85);
+            color: #d8dcf0;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        #jg-open:hover { background: rgba(42, 47, 82, 0.9); }
+        #jg-open.on { background: #4a3f77; border-color: #7a68b0; }
+
+        #jg-panel {
+            display: none;
+            position: absolute;
+            left: 12px;
+            top: 92px;
+            z-index: 40;
+            padding: 10px;
+            border-radius: 10px;
+            background: rgba(18, 20, 36, 0.94);
+            border: 1px solid #3a3f68;
+            color: #d8dcf0;
+            font-size: 13px;
+        }
+        #jg-panel.on { display: block; }
+
+        #jg-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+        #jg-head span { flex: 1; }
+        #jg-head button, #jg-levels button {
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid #3a3f68;
+            background: #262a45;
+            color: #d8dcf0;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        #jg-head button:hover, #jg-levels button:hover { background: #333a5e; }
+        #jg-levels { display: flex; gap: 4px; margin-bottom: 8px; }
+        #jg-levels button.on { background: #4a3f77; border-color: #7a68b0; }
+
+        /* 판. 9칸 × 10줄. 칸 하나가 30px 이라 판이 270×300 이다. */
+        #jg-board {
+            display: grid;
+            grid-template-columns: repeat(9, 30px);
+            grid-template-rows: repeat(10, 30px);
+            background: #d8b478;
+            border: 1px solid #8a6b3f;
+            border-radius: 4px;
+        }
+
+        .jsq {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .jsq::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-right: 1px solid rgba(90, 60, 20, 0.45);
+            border-bottom: 1px solid rgba(90, 60, 20, 0.45);
+        }
+        /* 궁성 — 비스듬한 선이 그어진 자리라 바탕을 달리 한다 */
+        .jsq.palace::before { background: rgba(160, 110, 50, 0.18); }
+
+        /* 말. 한(사람)은 붉은 글씨, 초(다이아)는 푸른 글씨 — 장기가 그렇다. */
+        .jp {
+            position: relative;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 700;
+            background: #f0dfbe;
+            border: 1px solid #7a5a2a;
+        }
+        .jp.han { color: #b8242a; }
+        .jp.cho { color: #1d4ea8; }
+
+        .jsq.pick .jp { box-shadow: 0 0 0 2px #ff5c8a; }
+        .jsq.can::after {
+            content: '';
+            position: absolute;
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: rgba(60, 200, 120, 0.75);
+        }
+        .jsq.last::before { background: rgba(255, 120, 60, 0.22); }
+
+        #jg-msg { margin-top: 8px; min-height: 18px; color: #aab0d0; }
+
         /* ---------------- 할리갈리 ---------------- */
 
         #hg-open {
@@ -1237,6 +1338,7 @@
             <button id="chess-open">♟ 체스</button>
             <button id="go-open">⚫ 오목</button>
             <button id="hg-open">🔔 할리갈리</button>
+            <button id="jg-open">漢 장기</button>
             <div id="rps-hands"></div>
         </div>
 
@@ -1302,6 +1404,18 @@
             <button id="hg-bell">🔔 종</button>
             <button id="hg-flip">한 장 뒤집기</button>
             <div id="hg-msg"></div>
+        </div>
+
+        <div id="jg-panel">
+            <div id="jg-head">
+                <span id="jg-turn">…</span>
+                <button id="jg-new">새 판</button>
+                <button id="jg-giveup">그만</button>
+                <button id="jg-close">닫기</button>
+            </div>
+            <div id="jg-levels"></div>
+            <div id="jg-board"></div>
+            <div id="jg-msg"></div>
         </div>
 
         <!-- 누구로 들어와 있는가 -->
@@ -9523,6 +9637,192 @@
         // ============================================================
 
         const chessPanel = document.getElementById('chess-panel');
+        // ============================================================
+        // 장기
+        //
+        // 규칙과 다이아의 수는 서버가 정한다. 화면은 판을 그리고,
+        // 말을 고르면 **갈 수 있는 곳을 서버에 물어** 짚어 준다.
+        // 규칙을 화면에도 적으면 서버와 어긋난다 — 포·마상 막힘은
+        // 특히 손으로 짜면 틀리기 쉽다.
+        // ============================================================
+
+        const jgPanel = document.getElementById('jg-panel');
+        const jgBoard = document.getElementById('jg-board');
+        const jgTurn = document.getElementById('jg-turn');
+        const jgMsg = document.getElementById('jg-msg');
+        const jgLevels = document.getElementById('jg-levels');
+
+        const jg = {
+            rows: [], open: false, busy: false,
+            level: 'normal', levels: [],
+            pick: null,       // 고른 말
+            can: [],          // 그 말이 갈 수 있는 곳
+            last: null,       // 다이아가 마지막에 둔 자리
+            names: {},
+        };
+
+        function jgPalace(r, c) {
+            return (c >= 3 && c <= 5) && ((r >= 0 && r <= 2) || (r >= 7 && r <= 9));
+        }
+
+        function drawJg() {
+            jgBoard.innerHTML = '';
+
+            jg.rows.forEach((row, r) => {
+                for (let c = 0; c < row.length; c++) {
+                    const ch = row[c];
+                    const i = r * row.length + c;
+
+                    const sq = document.createElement('div');
+                    sq.className = 'jsq'
+                        + (jgPalace(r, c) ? ' palace' : '')
+                        + (jg.pick === i ? ' pick' : '')
+                        + (jg.can.indexOf(i) >= 0 ? ' can' : '')
+                        + (jg.last === i ? ' last' : '');
+                    sq.dataset.at = i;
+
+                    if (ch !== '.') {
+                        const p = document.createElement('div');
+                        // 대문자가 한(아래·사람), 소문자가 초(위·다이아)
+                        p.className = 'jp ' + (ch === ch.toUpperCase() ? 'han' : 'cho');
+                        p.textContent = jg.names[ch.toUpperCase()] || ch;
+                        sq.appendChild(p);
+                    }
+
+                    jgBoard.appendChild(sq);
+                }
+            });
+        }
+
+        function drawJgLevels() {
+            jgLevels.innerHTML = '';
+            (jg.levels || []).forEach(lv => {
+                const b = document.createElement('button');
+                b.textContent = lv.label;
+                b.className = (lv.key === jg.level) ? 'on' : '';
+                b.onclick = async () => {
+                    jg.level = lv.key;
+                    drawJgLevels();
+                    try {
+                        await fetch('/api/janggi/level', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ level: lv.key }),
+                        });
+                    } catch (e) {}
+                };
+                jgLevels.appendChild(b);
+            });
+        }
+
+        function applyJg(d) {
+            if (!d || d.ok === false) {
+                jgMsg.textContent = (d && d.error) || '뭔가 잘못됐다';
+                return;
+            }
+
+            if (d.rows) jg.rows = d.rows;
+            if (d.names) jg.names = d.names;
+            if (d.levels) jg.levels = d.levels;
+            if (d.level) jg.level = d.level;
+            if (typeof d.spot === 'number') jg.last = d.spot;
+
+            jg.open = !!d.open;
+            jg.pick = null;
+            jg.can = [];
+
+            drawJg();
+            drawJgLevels();
+
+            jgTurn.textContent = jg.open
+                ? '장기 — 당신은 한(붉은 쪽)'
+                : (d.winner ? (d.winner === 'you' ? '이겼다' : '다이아가 이겼다')
+                            : '판이 닫혔다');
+
+            jgMsg.textContent = d.reply || '';
+
+            if (d.reply) showReply(d.reply, d.expression || 'neutral', []);
+        }
+
+        async function jgCall(path, body) {
+            if (jg.busy) return;
+            jg.busy = true;
+
+            try {
+                const r = await fetch(path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body || {}),
+                });
+                applyJg(await r.json());
+            } catch (e) {
+                jgMsg.textContent = '서버와 연결이 안 된다';
+            } finally {
+                jg.busy = false;
+            }
+        }
+
+        jgBoard.addEventListener('click', async ev => {
+            const sq = ev.target.closest('.jsq');
+            if (!sq || !jg.open || jg.busy) return;
+
+            const at = parseInt(sq.dataset.at, 10);
+
+            // 이미 고른 말이 있고 갈 수 있는 곳을 눌렀으면 둔다
+            if (jg.pick !== null && jg.can.indexOf(at) >= 0) {
+                jgCall('/api/janggi/move', { from: jg.pick, to: at });
+                return;
+            }
+
+            // 아니면 그 자리의 말을 고른다. 갈 곳은 서버에 묻는다.
+            jg.pick = at;
+            jg.can = [];
+            drawJg();
+
+            try {
+                const d = await fetch('/api/janggi/moves?from=' + at)
+                    .then(r => r.json());
+                jg.can = d.moves || [];
+
+                if (!jg.can.length) jg.pick = null;
+
+                drawJg();
+            } catch (e) {
+                jg.pick = null;
+                drawJg();
+            }
+        });
+
+        document.getElementById('jg-open').addEventListener('click', async () => {
+            const on = jgPanel.classList.toggle('on');
+            document.getElementById('jg-open').classList.toggle('on', on);
+
+            if (!on) return;
+
+            try {
+                const d = await fetch('/api/janggi/state').then(r => r.json());
+                if (d.open) applyJg(d);
+                else jgCall('/api/janggi/new', { level: jg.level });
+            } catch (e) {
+                jgMsg.textContent = '판을 못 불러왔다';
+            }
+        });
+
+        document.getElementById('jg-close').addEventListener('click', () => {
+            jgPanel.classList.remove('on');
+            document.getElementById('jg-open').classList.remove('on');
+        });
+
+        document.getElementById('jg-new').addEventListener('click', () => {
+            jg.last = null;
+            jgCall('/api/janggi/new', { level: jg.level });
+        });
+
+        document.getElementById('jg-giveup').addEventListener('click', () => {
+            jgCall('/api/janggi/resign');
+        });
+
+
         // ============================================================
         // 할리갈리
         //

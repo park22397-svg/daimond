@@ -1060,6 +1060,76 @@ class VirtualAvatar:
     # 반응 속도는 halli.py 가 굴린다. 여기는 무슨 말을 할지만.
     # --------------------------------------------------------
 
+    # --------------------------------------------------------
+    # 장기
+    # --------------------------------------------------------
+
+    def jg_conf(self):
+        return self.game.get("janggi", {})
+
+    def jg_levels(self):
+        return self.jg_conf().get("levels", [])
+
+    def jg_level(self, key=None):
+        want = key or self.jg_conf().get("level", "normal")
+
+        for lv in self.jg_levels():
+            if lv.get("key") == want:
+                return lv
+
+        return {"key": "normal", "label": "보통"}
+
+    def jg_side(self):
+        return self.jg_conf().get("dia_side", "cho")
+
+    def jg_mercy(self, affinity=0):
+        conf = self.jg_conf()
+
+        if affinity < conf.get("mercy_from", 80):
+            return 0.0
+
+        return float(conf.get("mercy_chance", 0.0))
+
+    def is_janggi(self, text):
+        low = str(text or "").lower()
+
+        return any(w in low for w in self.jg_conf().get("triggers", []))
+
+    def jg_say(self, kind, stage=None, rng=None, **fmt):
+        import random as _random
+
+        rng = rng or _random
+
+        spec = self.jg_conf().get(kind, {})
+        lines = spec.get("lines", {})
+
+        tone = "polite" if self._polite(stage) else "casual"
+        pool = lines.get(tone) or lines.get("polite") or []
+
+        line = rng.choice(list(pool)) if pool else None
+
+        if line:
+            try:
+                line = line.format(**fmt)
+            except (KeyError, IndexError):
+                pass
+
+        return {
+            "line": line,
+            "expression": spec.get("expression"),
+            "motion": spec.get("motion"),
+            "affinity": int(spec.get("affinity", 0)),
+        }
+
+    def jg_note(self, game):
+        """장기 상황을 프롬프트에 한 줄로. 체스판과 같은 방식이다."""
+        if not isinstance(game, dict) or not game.get("board"):
+            return None
+
+        n = sum(1 for ch in game["board"] if ch != ".")
+
+        return f"둘이 장기를 두는 중이다. 말이 {n}개 남았다."
+
     def hg_conf(self):
         return self.game.get("halli", {})
 
@@ -6372,6 +6442,118 @@ DIA = VirtualAvatar(
                                "여기까지 해요. {n}번 이었네요."],
                     "casual": ["그래, 그만하자. 재밌었어.",
                                "여기까지. {n}번 이었네."],
+                },
+            },
+        },
+
+        # ----------------------------------------------------
+        # 장기
+        #
+        # 규칙과 둘 수는 janggi.py 가 쥔다. 쓸 만한 파이썬 장기
+        # 라이브러리가 없어서 규칙을 직접 썼다 — 포·궁성·마상 막힘·
+        # 빅장·외통까지.
+        # ----------------------------------------------------
+        "janggi": {
+
+            "levels": [
+                {"key": "easy", "label": "쉬움"},
+                {"key": "normal", "label": "보통"},
+                {"key": "hard", "label": "어려움"},
+            ],
+
+            "level": "normal",
+
+            "mercy_from": 80,
+            "mercy_chance": 0.25,
+
+            # 다이아가 잡는 쪽. 위(초)다. 사람이 아래(한)에서 먼저 둔다.
+            "dia_side": "cho",
+
+            "triggers": ["장기", "janggi", "장기판", "장기 두"],
+
+            "open": {
+                "expression": "fun",
+                "lines": {
+                    "polite": ["좋아요. 판 펼게요. 먼저 두세요.",
+                               "장기요? 그럼 제가 초 할게요."],
+                    "casual": ["좋아. 판 펼게. 네가 먼저 둬.",
+                               "장기? 그럼 나 초 할래."],
+                },
+            },
+
+            "move": {
+                "expression": "neutral",
+                "lines": {
+                    "polite": ["{spot}.", "음… {spot}."],
+                    "casual": ["{spot}.", "음… {spot}."],
+                },
+            },
+
+            # 말을 잡았을 때. 무엇을 잡았는지 말해 주면 판이 읽힌다.
+            "take": {
+                "expression": "fun",
+                "lines": {
+                    "polite": ["{piece} 받을게요.", "{piece} 하나 가져가요."],
+                    "casual": ["{piece} 받을게.", "{piece} 하나 가져간다."],
+                },
+            },
+
+            "check": {
+                "expression": "joy",
+                "motion": "nod",
+                "lines": {
+                    "polite": ["장군이요.", "장군! 궁 피하셔야죠."],
+                    "casual": ["장군.", "장군! 궁 피해야지."],
+                },
+            },
+
+            # 내가 장군을 맞았을 때 — 알아채는 것이 사람 같다
+            "checked": {
+                "expression": "surprised",
+                "lines": {
+                    "polite": ["아, 장군이네요. 피할게요."],
+                    "casual": ["아, 장군이네. 피할게."],
+                },
+            },
+
+            "won": {
+                "expression": "joy",
+                "motion": "nod",
+                "affinity": 3,
+                "lines": {
+                    "polite": ["외통이에요. 제가 이겼어요.",
+                               "{spot} — 여기서 끝이네요."],
+                    "casual": ["외통이다. 내가 이겼어.",
+                               "{spot} — 여기서 끝이네."],
+                },
+            },
+
+            "lost": {
+                "expression": "sorrow",
+                "motion": "cover",
+                "affinity": 5,
+                "lines": {
+                    "polite": ["졌어요. 궁이 갈 데가 없네요.",
+                               "외통이네요. 잘 두셨어요."],
+                    "casual": ["졌다. 궁이 갈 데가 없어.",
+                               "외통이네. 잘 뒀어."],
+                },
+            },
+
+            "draw": {
+                "expression": "neutral",
+                "lines": {
+                    "polite": ["둘 데가 없네요. 비겼어요."],
+                    "casual": ["둘 데가 없네. 비겼다."],
+                },
+            },
+
+            "resign": {
+                "expression": "fun",
+                "affinity": 1,
+                "lines": {
+                    "polite": ["그만두시게요? 알겠어요."],
+                    "casual": ["그만할래? 알겠어."],
                 },
             },
         },

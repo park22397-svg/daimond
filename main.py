@@ -2207,6 +2207,257 @@ def tts_api():
 
 
 # ============================================================
+# 장기
+#
+# 규칙과 둘 수는 janggi.py, 무슨 말을 할지는 개체(AVATAR).
+# 여기는 그 둘을 잇고 판을 기억해 둔다.
+# ============================================================
+
+def _jg_load():
+    g = memory_manager.load_memory_data().get("janggi")
+
+    if not isinstance(g, dict) or not g.get("board"):
+        return None
+
+    return g
+
+
+def _jg_save(board, level=None):
+    data = memory_manager.load_memory_data()
+    before = data.get("janggi") or {}
+
+    data["janggi"] = {
+        "board": board,
+        "level": level or before.get("level")
+                 or AVATAR.jg_level().get("key", "normal"),
+    }
+
+    memory_manager.save_memory_data(data)
+
+
+def _jg_clear():
+    data = memory_manager.load_memory_data()
+    data["janggi"] = {}
+    memory_manager.save_memory_data(data)
+
+
+def _jg_out(board, say=None, extra=None):
+    import janggi as JG
+
+    out = JG.view(board, AVATAR.jg_side()) if board else {"open": False}
+    out["ok"] = True
+    out["levels"] = AVATAR.jg_levels()
+    out["level"] = (_jg_load() or {}).get(
+        "level", AVATAR.jg_level().get("key", "normal"))
+
+    if say:
+        out["reply"] = say.get("line")
+        out["expression"] = say.get("expression")
+        out["motion"] = say.get("motion")
+
+    if extra:
+        out.update(extra)
+
+    return out
+
+
+@app.route("/api/janggi/state")
+def janggi_state_api():
+    g = _jg_load()
+
+    if not g:
+        return jsonify({"ok": True, "open": False,
+                        "levels": AVATAR.jg_levels()})
+
+    out = _jg_out(g["board"])
+    out["open"] = True
+
+    return jsonify(out)
+
+
+@app.route("/api/janggi/new", methods=["POST"])
+def janggi_new_api():
+    import janggi as JG
+
+    try:
+        data = request.get_json(silent=True) or {}
+        board = JG.new_board()
+        _jg_save(board, data.get("level"))
+
+        print("[장기]: 판을 펼쳤습니다.")
+
+        say = AVATAR.jg_say("open", _go_stage())
+        out = _jg_out(board, say)
+        out["open"] = True
+
+        return jsonify(out)
+
+    except Exception as e:
+        print(f"[장기 새 판 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/janggi/moves")
+def janggi_moves_api():
+    """이 말이 갈 수 있는 곳. 화면이 짚어 준다."""
+    import janggi as JG
+
+    try:
+        g = _jg_load()
+
+        if not g:
+            return jsonify({"ok": False, "error": "판이 없습니다."}), 400
+
+        i = request.args.get("from", type=int)
+        board = g["board"]
+
+        if i is None or not (0 <= i < len(board)) or board[i] == JG.EMPTY:
+            return jsonify({"ok": True, "moves": []})
+
+        you = JG.other(AVATAR.jg_side())
+
+        if JG.side_of(board[i]) != you:
+            return jsonify({"ok": True, "moves": []})
+
+        # 두고 나서 내 궁이 잡히는 수는 빼고 준다
+        legal = [t for f, t in JG.legal_moves(board, you) if f == i]
+
+        return jsonify({"ok": True, "moves": legal})
+
+    except Exception as e:
+        print(f"[장기 갈 곳 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/janggi/move", methods=["POST"])
+def janggi_move_api():
+    import janggi as JG
+
+    try:
+        g = _jg_load()
+
+        if not g:
+            return jsonify({"ok": False, "error": "판이 없습니다."}), 400
+
+        board = g["board"]
+        data = request.get_json(silent=True) or {}
+        frm = data.get("from")
+        to = data.get("to")
+
+        you = JG.other(AVATAR.jg_side())
+        mine = AVATAR.jg_side()
+
+        if (frm, to) not in JG.legal_moves(board, you):
+            return jsonify({"ok": False, "error": "그렇게는 못 둡니다."}), 400
+
+        board = JG.move(board, frm, to)
+
+        # 사람이 이겼는가
+        end = JG.outcome(board, mine)
+
+        if end == "mate":
+            _jg_clear()
+            say = AVATAR.jg_say("lost", _go_stage())
+            _go_bump(say.get("affinity", 0))
+            print("[장기]: 사람이 이겼습니다.")
+
+            return jsonify(_jg_out(board, say, {"open": False, "winner": "you"}))
+
+        if end == "stalemate":
+            _jg_clear()
+            say = AVATAR.jg_say("draw", _go_stage())
+
+            return jsonify(_jg_out(board, say, {"open": False}))
+
+        # 다이아가 받는다
+        rel = memory_manager.load_relationship() or {}
+        level = g.get("level") or AVATAR.jg_level().get("key", "normal")
+
+        checked = JG.in_check(board, mine)
+
+        pick = JG.choose(board, mine, level,
+                         mercy=AVATAR.jg_mercy(rel.get("affinity", 0)))
+
+        if pick is None:
+            _jg_clear()
+            say = AVATAR.jg_say("draw", _go_stage())
+
+            return jsonify(_jg_out(board, say, {"open": False}))
+
+        took = board[pick[1]]
+        board = JG.move(board, *pick)
+        spot = JG.name(pick[1])
+
+        end = JG.outcome(board, you)
+
+        if end == "mate":
+            _jg_clear()
+            say = AVATAR.jg_say("won", _go_stage(), spot=spot)
+            _go_bump(say.get("affinity", 0))
+            print(f"[장기]: 다이아가 이겼습니다 ({spot}).")
+
+            return jsonify(_jg_out(board, say, {"open": False, "winner": "dia"}))
+
+        _jg_save(board, g.get("level"))
+
+        # 무슨 말을 할지 — 장군 > 잡음 > 장군 맞고 피함 > 그냥 한 수
+        if JG.in_check(board, you):
+            kind, fmt = "check", {}
+        elif took != JG.EMPTY:
+            kind, fmt = "take", {"piece": JG.KO.get(took.upper(), "말")}
+        elif checked:
+            kind, fmt = "checked", {}
+        else:
+            kind, fmt = "move", {}
+
+        say = AVATAR.jg_say(kind, _go_stage(), spot=spot, **fmt)
+
+        out = _jg_out(board, say, {"open": True, "spot": pick[1],
+                                   "from": pick[0]})
+
+        return jsonify(out)
+
+    except Exception as e:
+        print(f"[장기 두기 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/janggi/level", methods=["POST"])
+def janggi_level_api():
+    try:
+        data = request.get_json(silent=True) or {}
+        want = str(data.get("level") or "").strip()
+
+        if want not in [l.get("key") for l in AVATAR.jg_levels()]:
+            return jsonify({"ok": False, "error": "그런 세기가 없습니다."}), 400
+
+        g = _jg_load()
+
+        if g:
+            _jg_save(g["board"], want)
+
+        return jsonify({"ok": True, "level": want})
+
+    except Exception as e:
+        print(f"[장기 세기 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/janggi/resign", methods=["POST"])
+def janggi_resign_api():
+    try:
+        _jg_clear()
+        say = AVATAR.jg_say("resign", _go_stage())
+        _go_bump(say.get("affinity", 0))
+
+        return jsonify(_jg_out(None, say, {"open": False}))
+
+    except Exception as e:
+        print(f"[장기 그만 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+# ============================================================
 # 할리갈리
 #
 # 규칙과 반응 속도는 halli.py, 무슨 말을 할지는 개체(AVATAR).
