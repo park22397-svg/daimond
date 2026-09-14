@@ -201,6 +201,15 @@ def load_memory_data():
     if not isinstance(game_rps, dict):
         game_rps = {}
 
+    # 하던 할리갈리.
+    #
+    # 다른 놀이와 같은 이유로 여기 적어 둔다. 안 적으면 한 장 뒤집을
+    # 때마다 판이 사라진다.
+    bells = data.get("halli", {})
+
+    if not isinstance(bells, dict):
+        bells = {}
+
     # 두던 오목판.
     #
     # 체스판과 같은 이유로 여기 적어 둔다. 안 적으면 한 수 둘 때마다
@@ -254,6 +263,7 @@ def load_memory_data():
         "place": place,
         "word_chain": chain,
         "gomoku": stones,
+        "halli": bells,
     }
 
 

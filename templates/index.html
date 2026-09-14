@@ -400,6 +400,102 @@
             color: #fff;
         }
 
+        /* ---------------- 할리갈리 ---------------- */
+
+        #hg-open {
+            padding: 6px 10px;
+            border-radius: 8px;
+            border: 1px solid #3a3f68;
+            background: rgba(30, 34, 58, 0.85);
+            color: #d8dcf0;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        #hg-open:hover { background: rgba(42, 47, 82, 0.9); }
+        #hg-open.on { background: #4a3f77; border-color: #7a68b0; }
+
+        #hg-panel {
+            display: none;
+            position: absolute;
+            left: 12px;
+            top: 92px;
+            z-index: 40;
+            width: 300px;
+            padding: 10px;
+            border-radius: 10px;
+            background: rgba(18, 20, 36, 0.94);
+            border: 1px solid #3a3f68;
+            color: #d8dcf0;
+            font-size: 13px;
+        }
+        #hg-panel.on { display: block; }
+
+        #hg-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+        #hg-head span { flex: 1; }
+        #hg-head button, #hg-levels button {
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid #3a3f68;
+            background: #262a45;
+            color: #d8dcf0;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        #hg-head button:hover, #hg-levels button:hover { background: #333a5e; }
+        #hg-levels { display: flex; gap: 4px; margin-bottom: 10px; }
+        #hg-levels button.on { background: #4a3f77; border-color: #7a68b0; }
+
+        #hg-table { display: flex; gap: 10px; margin-bottom: 10px; }
+        .hg-side { flex: 1; text-align: center; }
+        .hg-cap { font-size: 11px; color: #8f96bb; margin-bottom: 4px; }
+        .hg-n { font-size: 11px; color: #8f96bb; margin-top: 4px; }
+
+        /* 뒤집힌 카드 한 장. 과일과 개수를 큼직하게 —
+           세는 놀이라 한눈에 안 들어오면 재미가 없다. */
+        .hg-card {
+            height: 76px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            letter-spacing: -2px;
+            border-radius: 8px;
+            background: #f3efe4;
+            color: #333;
+            border: 1px solid #cfc7b2;
+        }
+        .hg-card.empty { background: #23263c; border-color: #333a5e; color: #4a5178; }
+
+        /* 종. 반사신경 놀이라 크고 누르기 쉬워야 한다. */
+        #hg-bell {
+            width: 100%;
+            padding: 14px;
+            font-size: 20px;
+            border-radius: 10px;
+            border: 1px solid #7a5a2a;
+            background: #d9a441;
+            color: #2a1c05;
+            cursor: pointer;
+            margin-bottom: 6px;
+        }
+        #hg-bell:hover { background: #e8b455; }
+        #hg-bell:active { transform: scale(0.97); }
+        #hg-bell.hot { background: #ff7a4a; border-color: #b04a20; }
+
+        #hg-flip {
+            width: 100%;
+            padding: 8px;
+            border-radius: 8px;
+            border: 1px solid #3a3f68;
+            background: #262a45;
+            color: #d8dcf0;
+            cursor: pointer;
+        }
+        #hg-flip:hover { background: #333a5e; }
+        #hg-flip:disabled { opacity: 0.4; cursor: default; }
+
+        #hg-msg { margin-top: 8px; min-height: 18px; color: #aab0d0; }
+
         /* ---------------- 오목 ---------------- */
 
         #go-open {
@@ -1140,6 +1236,7 @@
             <button id="rps-open">✌ 가위바위보</button>
             <button id="chess-open">♟ 체스</button>
             <button id="go-open">⚫ 오목</button>
+            <button id="hg-open">🔔 할리갈리</button>
             <div id="rps-hands"></div>
         </div>
 
@@ -1180,6 +1277,31 @@
             <div id="go-levels"></div>
             <div id="go-board"></div>
             <div id="go-msg"></div>
+        </div>
+
+        <div id="hg-panel">
+            <div id="hg-head">
+                <span id="hg-turn">…</span>
+                <button id="hg-new">새 판</button>
+                <button id="hg-quit">그만</button>
+                <button id="hg-close">닫기</button>
+            </div>
+            <div id="hg-levels"></div>
+            <div id="hg-table">
+                <div class="hg-side">
+                    <div class="hg-cap">다이아</div>
+                    <div class="hg-card" id="hg-card-dia">·</div>
+                    <div class="hg-n"><span id="hg-hand-dia">0</span>장</div>
+                </div>
+                <div class="hg-side">
+                    <div class="hg-cap">나</div>
+                    <div class="hg-card" id="hg-card-you">·</div>
+                    <div class="hg-n"><span id="hg-hand-you">0</span>장</div>
+                </div>
+            </div>
+            <button id="hg-bell">🔔 종</button>
+            <button id="hg-flip">한 장 뒤집기</button>
+            <div id="hg-msg"></div>
         </div>
 
         <!-- 누구로 들어와 있는가 -->
@@ -9401,6 +9523,188 @@
         // ============================================================
 
         const chessPanel = document.getElementById('chess-panel');
+        // ============================================================
+        // 할리갈리
+        //
+        // 반사신경 놀이라 다른 놀이와 얼개가 다르다. 뒤집을 때마다
+        // 서버가 '다이아가 몇 ms 뒤에 종을 칠지' 를 같이 준다.
+        // 화면이 그만큼 기다렸다가, 사람이 먼저 안 눌렀으면 다이아가
+        // 친 것으로 알린다.
+        // ============================================================
+
+        const hgPanel = document.getElementById('hg-panel');
+        const hgMsg = document.getElementById('hg-msg');
+        const hgTurn = document.getElementById('hg-turn');
+        const hgBell = document.getElementById('hg-bell');
+        const hgFlip = document.getElementById('hg-flip');
+        const hgLevels = document.getElementById('hg-levels');
+
+        const hg = {
+            on: false,
+            level: 'normal',
+            levels: [],
+            busy: false,
+            timer: null,      // 다이아가 칠 때를 기다리는 타이머
+            shownAt: 0,       // 카드가 보인 시각 — 사람의 반응 시간을 잰다
+            autoFlip: null,
+        };
+
+        const HG_ICON = {
+            banana: '🍌', lime: '🍏', berry: '🍓', plum: '🍇',
+        };
+
+        function hgClearTimers() {
+            if (hg.timer) { clearTimeout(hg.timer); hg.timer = null; }
+            if (hg.autoFlip) { clearTimeout(hg.autoFlip); hg.autoFlip = null; }
+        }
+
+        function hgCard(el, card) {
+            if (!card) {
+                el.textContent = '·';
+                el.classList.add('empty');
+                return;
+            }
+            el.classList.remove('empty');
+            el.textContent = (HG_ICON[card.fruit] || '?').repeat(card.n);
+        }
+
+        function drawHgLevels() {
+            hgLevels.innerHTML = '';
+            (hg.levels || []).forEach(lv => {
+                const b = document.createElement('button');
+                b.textContent = lv.label;
+                b.className = (lv.key === hg.level) ? 'on' : '';
+                b.onclick = async () => {
+                    hg.level = lv.key;
+                    drawHgLevels();
+                    try {
+                        await fetch('/api/halli/level', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ level: lv.key }),
+                        });
+                    } catch (e) {}
+                };
+                hgLevels.appendChild(b);
+            });
+        }
+
+        function applyHg(d) {
+            if (!d || d.ok === false) {
+                hgMsg.textContent = (d && d.error) || '뭔가 잘못됐다';
+                return;
+            }
+
+            hgClearTimers();
+
+            if (d.levels) hg.levels = d.levels;
+            if (d.level) hg.level = d.level;
+            hg.on = !!d.on;
+
+            drawHgLevels();
+
+            const open = d.open || {};
+            hgCard(document.getElementById('hg-card-dia'), open.dia);
+            hgCard(document.getElementById('hg-card-you'), open.you);
+
+            const hand = d.hand || {};
+            document.getElementById('hg-hand-dia').textContent = hand.dia || 0;
+            document.getElementById('hg-hand-you').textContent = hand.you || 0;
+
+            hgBell.classList.toggle('hot', !!d.ring);
+            hgFlip.disabled = !hg.on;
+
+            hgTurn.textContent = hg.on
+                ? (d.turn === 'you' ? '내 차례' : '다이아 차례')
+                : (d.winner ? (d.winner === 'you' ? '내가 이겼다' : '다이아가 이겼다')
+                            : '판이 닫혔다');
+
+            hgMsg.textContent = d.reply || '';
+
+            if (d.reply) showReply(d.reply, d.expression || 'neutral', []);
+
+            if (!hg.on) return;
+
+            hg.shownAt = performance.now();
+
+            // 다이아가 칠 때를 기다린다.
+            //
+            // 사람이 먼저 누르면 이 타이머는 취소된다.
+            if (typeof d.dia_ms === 'number' && d.dia_ms > 0) {
+                hg.timer = setTimeout(() => {
+                    hg.timer = null;
+                    hgCall('/api/halli/bell', { who: 'dia' });
+                }, d.dia_ms);
+            }
+
+            // 다이아 차례면 알아서 뒤집는다. 사람이 눌러 줄 일이 아니다.
+            if (d.turn === 'dia') {
+                hg.autoFlip = setTimeout(() => {
+                    hg.autoFlip = null;
+                    hgCall('/api/halli/flip');
+                }, 700);
+            }
+        }
+
+        async function hgCall(path, body) {
+            if (hg.busy) return;
+            hg.busy = true;
+
+            try {
+                const r = await fetch(path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body || {}),
+                });
+                applyHg(await r.json());
+            } catch (e) {
+                hgMsg.textContent = '서버와 연결이 안 된다';
+            } finally {
+                hg.busy = false;
+            }
+        }
+
+        hgBell.addEventListener('click', () => {
+            if (!hg.on) return;
+
+            // 카드가 보인 뒤 얼마나 걸렸는지 재서 보낸다.
+            // 서버가 다이아 쪽과 견줘서 누가 먼저인지 가른다.
+            const ms = Math.max(0, Math.round(performance.now() - hg.shownAt));
+
+            hgClearTimers();
+            hgCall('/api/halli/bell', { who: 'you', ms: ms });
+        });
+
+        hgFlip.addEventListener('click', () => hgCall('/api/halli/flip'));
+
+        document.getElementById('hg-open').addEventListener('click', async () => {
+            const on = hgPanel.classList.toggle('on');
+            document.getElementById('hg-open').classList.toggle('on', on);
+
+            if (!on) { hgClearTimers(); return; }
+
+            try {
+                const d = await fetch('/api/halli/state').then(r => r.json());
+                if (d.on) applyHg(d);
+                else hgCall('/api/halli/new', { level: hg.level });
+            } catch (e) {
+                hgMsg.textContent = '판을 못 불러왔다';
+            }
+        });
+
+        document.getElementById('hg-close').addEventListener('click', () => {
+            hgClearTimers();
+            hgPanel.classList.remove('on');
+            document.getElementById('hg-open').classList.remove('on');
+        });
+
+        document.getElementById('hg-new').addEventListener('click',
+            () => hgCall('/api/halli/new', { level: hg.level }));
+
+        document.getElementById('hg-quit').addEventListener('click',
+            () => hgCall('/api/halli/quit'));
+
+
         // ============================================================
         // 오목
         //

@@ -2207,6 +2207,253 @@ def tts_api():
 
 
 # ============================================================
+# 할리갈리
+#
+# 규칙과 반응 속도는 halli.py, 무슨 말을 할지는 개체(AVATAR).
+#
+# 이 놀이는 **누가 먼저 손을 대는가** 가 전부다. 그래서 뒤집을 때마다
+# 다이아가 종을 치기까지 걸릴 시간을 굴려서 화면에 같이 보낸다.
+# 화면이 그 시간만큼 기다렸다가, 사람이 먼저 안 눌렀으면 다이아가
+# 친 것으로 알린다.
+#
+# 시간을 화면에 알려 주는 것이 꺼림칙할 수 있지만, 혼자 하는 놀이라
+# 속일 사람이 없다. 서버에서 재려면 타이머를 돌려야 하는데 그건
+# 훨씬 무겁다.
+# ============================================================
+
+def _hg_load():
+    g = memory_manager.load_memory_data().get("halli")
+
+    if not isinstance(g, dict) or not g.get("on"):
+        return None
+
+    return g
+
+
+def _hg_save(game):
+    data = memory_manager.load_memory_data()
+    data["halli"] = game or {}
+    memory_manager.save_memory_data(data)
+
+
+def _hg_clear():
+    _hg_save({})
+
+
+def _hg_say(kind, **fmt):
+    """할 말 한 벌. 호감도 같이 옮긴다."""
+    say = AVATAR.hg_say(kind, _go_stage(), **fmt)
+
+    if say.get("affinity"):
+        _go_bump(say["affinity"])
+
+    return say
+
+
+def _hg_out(game, say=None, extra=None):
+    import halli as HG
+
+    out = HG.view(game) if game else {"on": False}
+    out["ok"] = True
+    out["levels"] = AVATAR.hg_levels()
+
+    if say:
+        out["reply"] = say.get("line")
+        out["expression"] = say.get("expression")
+        out["motion"] = say.get("motion")
+
+    if extra:
+        out.update(extra)
+
+    return out
+
+
+@app.route("/api/halli/state")
+def halli_state_api():
+    g = _hg_load()
+
+    if not g:
+        return jsonify({"ok": True, "on": False,
+                        "levels": AVATAR.hg_levels()})
+
+    return jsonify(_hg_out(g))
+
+
+@app.route("/api/halli/new", methods=["POST"])
+def halli_new_api():
+    import halli as HG
+
+    try:
+        data = request.get_json(silent=True) or {}
+        level = data.get("level") or AVATAR.hg_level().get("key", "normal")
+
+        g = HG.new_game(level=level)
+        _hg_save(g)
+
+        print("[할리갈리]: 판을 열었습니다.")
+
+        return jsonify(_hg_out(g, _hg_say("open")))
+
+    except Exception as e:
+        print(f"[할리갈리 새 판 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/halli/flip", methods=["POST"])
+def halli_flip_api():
+    """한 장 뒤집는다. 차례인 쪽이 뒤집는다."""
+    import halli as HG
+    import random as _rnd
+
+    try:
+        g = _hg_load()
+
+        if not g:
+            return jsonify({"ok": False, "error": "판이 없습니다."}), 400
+
+        who = g.get("turn") or "you"
+
+        if not HG.flip(g, who):
+            # 뒤집을 것이 없다. 진 것이다.
+            _hg_clear()
+            lost = (who == "dia")
+            say = _hg_say("lost" if lost else "won")
+
+            return jsonify(_hg_out(None, say, {"winner": "you" if lost else "dia"}))
+
+        # 종 칠 때인가. 다이아가 얼마나 빨리 칠지 굴린다.
+        fruit = HG.should_ring(g)
+        rel = memory_manager.load_relationship() or {}
+        mercy = AVATAR.hg_mercy(rel.get("affinity", 0))
+        level = g.get("level") or "normal"
+
+        g["ring"] = bool(fruit)
+        g["dia_ms"] = None
+        g["dia_wrong"] = False
+
+        if fruit:
+            ms, wrong = HG.roll_reaction(level, mercy)
+            g["dia_ms"] = ms
+            g["dia_wrong"] = False          # 맞는 자리라 잘못이 아니다
+        else:
+            # 아닌데 치는 것도 있다. 한 번도 안 틀리는 상대는
+            # 사람 같지 않고, 사람에게 카드를 줄 기회도 안 생긴다.
+            conf = HG.LEVELS.get(level) or HG.LEVELS["normal"]
+
+            if _rnd.random() < conf["wrong"]:
+                g["dia_ms"] = HG.wrong_ring_delay(level)
+                g["dia_wrong"] = True
+
+        _hg_save(g)
+
+        return jsonify(_hg_out(g, None, {
+            "flipped": who,
+            "dia_ms": g["dia_ms"],
+        }))
+
+    except Exception as e:
+        print(f"[할리갈리 뒤집기 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/halli/bell", methods=["POST"])
+def halli_bell_api():
+    """종을 쳤다. who 는 'you' 또는 'dia'."""
+    import halli as HG
+
+    try:
+        g = _hg_load()
+
+        if not g:
+            return jsonify({"ok": False, "error": "판이 없습니다."}), 400
+
+        data = request.get_json(silent=True) or {}
+        who = "dia" if data.get("who") == "dia" else "you"
+        ms = data.get("ms")
+
+        fruit = HG.should_ring(g)
+
+        # 사람이 쳤는데 다이아가 더 빨랐는가.
+        #
+        # 화면이 시간을 재서 보낸다. 다이아 쪽이 빠르면 다이아가
+        # 친 것으로 넘긴다 — 화면 타이머와 사람 손이 거의 같이
+        # 도착하는 자리라 여기서 한 번 더 가른다.
+        if (who == "you" and isinstance(ms, (int, float))
+                and g.get("dia_ms") and ms > g["dia_ms"]):
+            who = "dia"
+
+        if who == "dia":
+            right = bool(fruit) and not g.get("dia_wrong")
+        else:
+            right = bool(fruit)
+
+        if right:
+            n = HG.take_pile(g, who)
+            say = _hg_say("dia_ring" if who == "dia" else "you_ring",
+                          fruit=HG.FRUIT_KO.get(fruit, ""), n=n)
+        else:
+            HG.penalty(g, who)
+            say = _hg_say("dia_wrong" if who == "dia" else "you_wrong")
+
+        g["ring"] = False
+        g["dia_ms"] = None
+        g["dia_wrong"] = False
+
+        # 종을 친 쪽이 다음에 뒤집는다
+        g["turn"] = who
+
+        won = HG.winner(g)
+
+        if won:
+            _hg_clear()
+            end = _hg_say("won" if won == "dia" else "lost")
+
+            return jsonify(_hg_out(None, end, {"winner": won}))
+
+        _hg_save(g)
+
+        return jsonify(_hg_out(g, say, {"right": right, "rang": who}))
+
+    except Exception as e:
+        print(f"[할리갈리 종 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/halli/level", methods=["POST"])
+def halli_level_api():
+    try:
+        data = request.get_json(silent=True) or {}
+        want = str(data.get("level") or "").strip()
+
+        if want not in [l.get("key") for l in AVATAR.hg_levels()]:
+            return jsonify({"ok": False, "error": "그런 세기가 없습니다."}), 400
+
+        g = _hg_load()
+
+        if g:
+            g["level"] = want
+            _hg_save(g)
+
+        return jsonify({"ok": True, "level": want})
+
+    except Exception as e:
+        print(f"[할리갈리 세기 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+@app.route("/api/halli/quit", methods=["POST"])
+def halli_quit_api():
+    try:
+        _hg_clear()
+
+        return jsonify(_hg_out(None, _hg_say("quit")))
+
+    except Exception as e:
+        print(f"[할리갈리 그만 오류]: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
+# ============================================================
 # 오목
 #
 # 규칙과 둘 자리는 gomoku.py, 무슨 말을 할지는 개체(AVATAR).

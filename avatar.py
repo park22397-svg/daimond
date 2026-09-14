@@ -1054,6 +1054,78 @@ class VirtualAvatar:
     # 둘 자리는 gomoku.py 가 정한다. 여기는 무슨 말을 할지만.
     # --------------------------------------------------------
 
+    # --------------------------------------------------------
+    # 할리갈리
+    #
+    # 반응 속도는 halli.py 가 굴린다. 여기는 무슨 말을 할지만.
+    # --------------------------------------------------------
+
+    def hg_conf(self):
+        return self.game.get("halli", {})
+
+    def hg_levels(self):
+        return self.hg_conf().get("levels", [])
+
+    def hg_level(self, key=None):
+        want = key or self.hg_conf().get("level", "normal")
+
+        for lv in self.hg_levels():
+            if lv.get("key") == want:
+                return lv
+
+        return {"key": "normal", "label": "보통"}
+
+    def hg_mercy(self, affinity=0):
+        conf = self.hg_conf()
+
+        if affinity < conf.get("mercy_from", 80):
+            return 0.0
+
+        return float(conf.get("mercy_chance", 0.0))
+
+    def is_halli(self, text):
+        low = str(text or "").lower()
+
+        return any(w in low for w in self.hg_conf().get("triggers", []))
+
+    def hg_say(self, kind, stage=None, rng=None, **fmt):
+        import random as _random
+
+        rng = rng or _random
+
+        spec = self.hg_conf().get(kind, {})
+        lines = spec.get("lines", {})
+
+        tone = "polite" if self._polite(stage) else "casual"
+        pool = lines.get(tone) or lines.get("polite") or []
+
+        line = rng.choice(list(pool)) if pool else None
+
+        if line:
+            try:
+                line = line.format(**fmt)
+            except (KeyError, IndexError):
+                pass
+
+        return {
+            "line": line,
+            "expression": spec.get("expression"),
+            "motion": spec.get("motion"),
+            "affinity": int(spec.get("affinity", 0)),
+        }
+
+    def hg_note(self, game):
+        """할리갈리 상황을 프롬프트에 한 줄로."""
+        if not isinstance(game, dict) or not game.get("on"):
+            return None
+
+        hand = game.get("hand") or {}
+        you = len(hand.get("you") or [])
+        dia = len(hand.get("dia") or [])
+
+        return (f"둘이 할리갈리를 하는 중이다. 상대 패가 {you}장, "
+                f"네 패가 {dia}장이다.")
+
     def go_conf(self):
         return self.game.get("gomoku", {})
 
@@ -1882,7 +1954,7 @@ class VirtualAvatar:
         return max(-cap, min(cap, delta))
 
     def apply_delta(self, affinity, delta, stage=None, lover=True,
-                    friends=True):
+                    friends=True, grants=None):
         """친밀도를 옮긴다.
 
         되돌아가지 않는 단계에서는 깎이지 않는다.
@@ -1891,15 +1963,22 @@ class VirtualAvatar:
         if delta < 0 and stage is not None and                 getattr(stage, "never_falls", False):
             delta = 0
         return self.clamp_affinity(affinity + delta, lover=lover,
-                                   friends=friends)
+                                   friends=friends, grants=grants)
 
-    def clamp_affinity(self, value, lover=True, friends=True):
+    def clamp_affinity(self, value, lover=True, friends=True, grants=None):
         """호감을 눈금 안으로 넣는다.
 
         말을 놓기 전에는 친구 자리에서, 연인이 되기 전에는 그보다 높은
         자리에서 멈춘다. 말도 안 놓았는데 사이만 깊어지거나, 사귀자는
         말 없이 마음만 더 깊어지는 일은 없기 때문이다.
+
+        grants 로 넘겨도 된다 — gate_grants() 가 만드는 그 dict 다.
+        부르는 쪽이 lover/friends 를 하나씩 풀어 쓰지 않아도 된다.
         """
+        if grants is not None:
+            friends = bool(grants.get("friends", friends))
+            lover = bool(grants.get("lover", lover))
+
         sc = self.relationship.get("scoring", {})
         top = sc.get("max", 100)
 
@@ -6318,6 +6397,130 @@ DIA = VirtualAvatar(
                                "여기까지 해요. {n}번 이었네요."],
                     "casual": ["그래, 그만하자. 재밌었어.",
                                "여기까지. {n}번 이었네."],
+                },
+            },
+        },
+
+        # ----------------------------------------------------
+        # 할리갈리
+        #
+        # 다른 놀이와 성격이 다르다. 체스는 '어디에 둘까' 가 세기지만
+        # 이것은 **누가 먼저 손을 대는가** 가 전부다. 그래서 세기를
+        # 두는 눈이 아니라 반응 시간으로 낸다(halli.LEVELS).
+        #
+        # 기계는 0.001초에 누를 수 있어서 그대로 두면 사람이 영영
+        # 못 이긴다. 사람이 눈으로 보고 세고 손을 움직이는 데 드는
+        # 0.8~1.5초를 감안해서 잡았다.
+        #
+        # 가끔 틀리게 치기도 하고 아예 못 보고 지나가기도 한다.
+        # 한 번도 안 틀리는 상대는 사람 같지 않다.
+        # ----------------------------------------------------
+        "halli": {
+
+            "levels": [
+                {"key": "easy", "label": "느긋"},
+                {"key": "normal", "label": "보통"},
+                {"key": "hard", "label": "빠름"},
+            ],
+
+            "level": "normal",
+
+            # 사이가 깊으면 가끔 늦게 친다. **안 치는 것이 아니라
+            # 늦게 친다** — 아예 안 치면 봐주는 티가 난다.
+            "mercy_from": 80,
+            "mercy_chance": 0.3,
+
+            "triggers": [
+                "할리갈리", "할리 갈리", "halligalli", "halli galli", "종치기",
+            ],
+
+            "open": {
+                "expression": "fun",
+                "lines": {
+                    "polite": [
+                        "좋아요. 한 장씩 뒤집어요. 같은 과일이 다섯이면 종이에요.",
+                        "할리갈리요? 해요. 먼저 뒤집으세요.",
+                    ],
+                    "casual": [
+                        "좋아. 한 장씩 뒤집자. 같은 과일 다섯이면 종이야.",
+                        "할리갈리? 하자. 네가 먼저 뒤집어.",
+                    ],
+                },
+            },
+
+            # 다이아가 먼저 쳤다
+            "dia_ring": {
+                "expression": "joy",
+                "motion": "nod",
+                "affinity": 1,
+                "lines": {
+                    "polite": ["종! {fruit} 다섯이요. {n}장 가져갈게요.",
+                               "제가 먼저요. {fruit} 다섯."],
+                    "casual": ["종! {fruit} 다섯. {n}장 가져간다.",
+                               "내가 먼저. {fruit} 다섯이야."],
+                },
+            },
+
+            # 사람이 먼저 쳤다
+            "you_ring": {
+                "expression": "surprised",
+                "affinity": 2,
+                "lines": {
+                    "polite": ["앗, 빠르시네요. {n}장 가져가세요.",
+                               "졌다… 손이 빠르세요."],
+                    "casual": ["앗, 빠르네. {n}장 가져가.",
+                               "졌다… 손 빠르네."],
+                },
+            },
+
+            # 다이아가 아닌데 쳤다
+            "dia_wrong": {
+                "expression": "fluster",
+                "motion": "cover",
+                "affinity": 1,
+                "lines": {
+                    "polite": ["앗… 아니네요. 한 장 드릴게요.",
+                               "잘못 쳤어요. 죄송."],
+                    "casual": ["앗… 아니네. 한 장 줄게.",
+                               "잘못 쳤다. 미안."],
+                },
+            },
+
+            # 사람이 아닌데 쳤다
+            "you_wrong": {
+                "expression": "fun",
+                "lines": {
+                    "polite": ["다섯 아니에요. 한 장 주세요.",
+                               "어? 아직 아닌데요."],
+                    "casual": ["다섯 아니야. 한 장 줘.",
+                               "어? 아직 아닌데."],
+                },
+            },
+
+            "won": {
+                "expression": "joy",
+                "motion": "nod",
+                "affinity": 3,
+                "lines": {
+                    "polite": ["패가 다 떨어지셨네요. 제가 이겼어요."],
+                    "casual": ["패 다 떨어졌네. 내가 이겼다."],
+                },
+            },
+
+            "lost": {
+                "expression": "sorrow",
+                "affinity": 5,
+                "lines": {
+                    "polite": ["제 패가 다 떨어졌어요. 졌어요."],
+                    "casual": ["내 패가 다 떨어졌어. 졌다."],
+                },
+            },
+
+            "quit": {
+                "expression": "neutral",
+                "lines": {
+                    "polite": ["그만해요. 재밌었어요."],
+                    "casual": ["그만하자. 재밌었어."],
                 },
             },
         },
