@@ -56,7 +56,75 @@ def ollama_url():
         print("[모델 주소 읽기 실패]", e)
         _runtime["url"] = None
 
-    return _runtime["url"] or OLLAMA_URL
+    return _dns_safe(_runtime["url"] or OLLAMA_URL)
+
+
+# ============================================================
+# 이름이 안 풀릴 때
+#
+# cju.nezip.co.kr 이 안 풀려서 대화가 통째로 막힌 적이 있다.
+# 서버는 멀쩡했다 — IP 로는 0.03초에 닿았다. 이름을 알려 주는 쪽이
+# 죽어 있었던 것이다.
+#
+# 이름을 먼저 써 보고, 안 풀리면 적어 둔 IP 로 바꿔 부른다.
+# 이름을 버리지 않는 이유: IP 는 바뀔 수 있고, 그때 이름이 다시
+# 살아 있으면 저절로 그쪽으로 돌아간다.
+# ============================================================
+
+# 이름이 안 풀릴 때 대신 쓸 자리
+KNOWN_IP = {
+    "cju.nezip.co.kr": "203.252.241.34",
+}
+
+_dns = {}
+
+
+def _dns_safe(url):
+    """이름이 안 풀리면 IP 로 바꾼 주소를 돌려준다."""
+    import socket
+    import time
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except Exception:
+        return url
+
+    if not host or host not in KNOWN_IP:
+        return url
+
+    now = time.time()
+    seen = _dns.get(host)
+
+    # 한 번 본 것은 2분 담아 둔다. 대화마다 이름을 물으면
+    # 안 풀릴 때 그만큼씩 기다린다.
+    if seen and now - seen[0] < 120:
+        ok = seen[1]
+    else:
+        try:
+            socket.setdefaulttimeout(2)
+            socket.getaddrinfo(host, None)
+            ok = True
+        except Exception:
+            ok = False
+        finally:
+            socket.setdefaulttimeout(None)
+
+        _dns[host] = (now, ok)
+
+        if not ok:
+            print(f"[모델 주소] '{host}' 이름이 안 풀려 "
+                  f"{KNOWN_IP[host]} 로 부릅니다.")
+
+    if ok:
+        return url
+
+    netloc = parts.netloc.replace(host, KNOWN_IP[host])
+
+    return urlunsplit((parts.scheme, netloc, parts.path,
+                       parts.query, parts.fragment))
+
 
 # 모델 비교 결과 gemma4:31b 로 교체 (2026-08-13)
 #
