@@ -9728,6 +9728,10 @@
                 return;
             }
 
+            // 판이 움직였으면 마주 앉은 것이다 — 자고 있으면 깨운다.
+            // 열기·새 판·한 수·기권이 전부 여기를 지난다(체스는 openChess).
+            if (isSleeping) wakeUp();
+
             if (d.rows) jg.rows = d.rows;
             if (d.names) jg.names = d.names;
             if (d.levels) jg.levels = d.levels;
@@ -9901,6 +9905,10 @@
                 hgMsg.textContent = (d && d.error) || '뭔가 잘못됐다';
                 return;
             }
+
+            // 판이 움직였으면 마주 앉은 것이다 — 자고 있으면 깨운다.
+            // 열기·새 판·한 수·기권이 전부 여기를 지난다(체스는 openChess).
+            if (isSleeping) wakeUp();
 
             hgClearTimers();
 
@@ -10088,6 +10096,10 @@
                 goMsg.textContent = (d && d.error) || '뭔가 잘못됐다';
                 return;
             }
+
+            // 판이 움직였으면 마주 앉은 것이다 — 자고 있으면 깨운다.
+            // 열기·새 판·한 수·기권이 전부 여기를 지난다(체스는 openChess).
+            if (isSleeping) wakeUp();
 
             if (d.rows) go.rows = d.rows;
             if (typeof d.spot === 'number') go.last = d.spot;
