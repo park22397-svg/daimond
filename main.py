@@ -2709,7 +2709,42 @@ def wardrobe_api():
         else:
             print(f"[옷장] 파일이 없어 건너뜀: {name}")
 
-    return jsonify({"ok": True, "items": live})
+    # 지금 무엇을 입고 있는가.
+    #
+    # 세 가지가 다르다.
+    #   적힌 옷 이름 → 그 옷을 입힌다
+    #   빈 문자열    → 일부러 벗은 것이다. 그대로 둔다
+    #   칸 자체가 없음 → 처음 온 사람이다. 기본 옷을 입힌다
+    #
+    # 마지막이 중요하다. 처음 열었을 때 벗고 있으면 안 된다.
+    worn = memory_manager.load_wearing()
+    keys = [it.get("key") for it in live]
+
+    if worn is None:
+        worn = keys[0] if keys else ""
+    elif worn and worn not in keys:
+        # 옷장에서 사라진 옷을 입고 있었다. 있는 것으로 갈아입힌다.
+        print(f"[옷장] 입고 있던 '{worn}' 이 없어졌다")
+        worn = keys[0] if keys else ""
+
+    return jsonify({"ok": True, "items": live, "worn": worn})
+
+
+@app.route("/api/wardrobe", methods=["POST"])
+def wardrobe_wear_api():
+    """무엇을 입었는지 적어 둔다. 창을 닫았다 열어도 그대로여야 한다.
+
+    벗었으면 빈 문자열을 보낸다 — '벗고 있음' 과 '아직 안 정함' 은
+    다르다. 뒤엣것은 처음 온 사람이라 기본 옷을 입힌다.
+    """
+
+    data = request.get_json(silent=True) or {}
+    key = str(data.get("key") or "")
+
+    memory_manager.save_wearing(key)
+    print(f"[옷장] {'벗었습니다' if not key else key + ' 을(를) 입었습니다'}")
+
+    return jsonify({"ok": True, "worn": key})
 
 
 @app.route("/api/background")

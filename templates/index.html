@@ -4364,28 +4364,48 @@
         let bodyMaskMesh = null;
 
         async function loadWardrobe() {
+            let want = null;
+
             try {
                 const res = await fetch('/api/wardrobe');
                 const d = await res.json();
                 wardrobe = d.items || [];
-                console.log('[diamondAI] 옷장 ' + wardrobe.length + '벌');
+                want = d.worn || '';
+                console.log('[diamondAI] 옷장 ' + wardrobe.length + '벌'
+                    + (want ? ' · 입고 있던 옷 ' + want : ' · 벗은 채'));
             } catch (e) {
                 wardrobe = [];
                 console.warn('[diamondAI] 옷장을 못 불러왔다:', e);
             }
+
             buildWearMenu();
+
+            // 입고 있던 옷을 도로 입는다.
+            //
+            // 서버가 '처음 온 사람' 에게는 기본 옷 이름을 준다.
+            // 창을 열었는데 벗고 있으면 안 된다.
+            if (want) await wearOutfit(want, true);
         }
 
         function wearItem(key) {
             return wardrobe.find(x => x.key === key) || null;
         }
 
-        function wearOutfit(key) {
+        function rememberWearing(key) {
+            // 무엇을 입었는지 적어 둔다. 실패해도 화면은 그대로 간다.
+            fetch('/api/wardrobe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: key || '' }),
+            }).catch(() => {});
+        }
+
+        function wearOutfit(key, restoring) {
             const item = wearItem(key);
             if (!item) return Promise.resolve(null);
             if (wornKey === key) return Promise.resolve(wearVRM);
 
-            takeOffOutfit();
+            takeOffOutfit(true);
 
             return new Promise(resolve => {
                 new THREE.GLTFLoader().load(
@@ -4409,6 +4429,11 @@
 
                             syncWear();
                             buildWearMenu();
+
+                            // 창을 열며 도로 입는 것은 적지 않는다.
+                            // 방금 읽어 온 값을 그대로 되쓰는 꼴이다.
+                            if (!restoring) rememberWearing(key);
+
                             console.log('[diamondAI] 옷 입음: ' + key);
                             resolve(vrm);
                         });
@@ -4422,7 +4447,7 @@
             });
         }
 
-        function takeOffOutfit() {
+        function takeOffOutfit(swapping) {
             if (!wearVRM) return;
 
             scene.remove(wearVRM.scene);
@@ -4441,6 +4466,9 @@
             showCoveredBody();
             splitParts();
             buildWearMenu();
+
+            // 갈아입는 중이면 적지 않는다. 곧 새 옷 이름이 적힌다.
+            if (!swapping) rememberWearing('');
         }
 
         function bindWearBones() {

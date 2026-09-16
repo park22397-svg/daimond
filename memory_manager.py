@@ -248,6 +248,14 @@ def load_memory_data():
     if not isinstance(place, dict):
         place = {}
 
+    # 지금 입고 있는 옷. 창을 닫았다 열어도 그대로여야 한다.
+    # 장소와 같은 자리다 — 아는 항목만 골라 새 dict 를 만들기 때문에
+    # 여기 안 적으면 저장할 때마다 벗겨진다.
+    wearing = data.get("wearing", {})
+
+    if not isinstance(wearing, dict):
+        wearing = {}
+
     if not isinstance(conversation, list):
         conversation = []
 
@@ -270,11 +278,35 @@ def load_memory_data():
         "chess": game_chess,
         "rps": game_rps,
         "place": place,
+        "wearing": wearing,
         "word_chain": chain,
         "gomoku": stones,
         "halli": bells,
         "janggi": jg,
     }
+
+
+def load_wearing():
+    """지금 입고 있는 옷 이름. 없으면 None.
+
+    '벗고 있음' 과 '아직 아무것도 안 정했음' 은 다르다.
+    벗겼으면 빈 문자열이 적히고, 처음 온 사람은 칸 자체가 없다 —
+    그래야 처음 온 사람에게만 기본 옷을 입힐 수 있다.
+    """
+    w = load_memory_data().get("wearing", {})
+
+    if not isinstance(w, dict) or "key" not in w:
+        return None
+
+    return w.get("key") or ""
+
+
+def save_wearing(key):
+    """입은 옷을 적는다. 벗었으면 빈 문자열."""
+    data = load_memory_data()
+    data["wearing"] = {"key": str(key or "")}
+    save_memory_data(data)
+    return data["wearing"]
 
 
 def load_session():
