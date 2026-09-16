@@ -454,8 +454,8 @@ def chat_api():
             woke=bool(data.get("woke")),
         )
 
-        # 답에 (배경: 공원) 이 섞여 있으면 실제로 옮긴다
-        result = _apply_place(result)
+        # 답에 (배경: 공원) · (옷: 교복) 이 섞여 있으면 실제로 옮기고 갈아입는다
+        result = _apply_wear(_apply_place(result))
 
         return jsonify(
             result
@@ -1285,7 +1285,7 @@ def first_talk_api():
         except Exception as e:
             print(f"[먼저 말걸기 저장 오류]: {e}")
 
-        _moved = _apply_place({"cues": cues})
+        _moved = _apply_wear(_apply_place({"cues": cues}))
 
         return jsonify(
             {
@@ -1293,6 +1293,7 @@ def first_talk_api():
                 "reply": reply,
                 "cues": _moved.get("cues", cues),
                 "place": _moved.get("place"),
+                "wear": _moved.get("wear"),
                 "expression": AVATAR.detect_expression(reply),
                 "stage": stage.key,
                 "label": _stage_label(stage),
@@ -2932,6 +2933,98 @@ def _place_image(name):
     pick = _rnd.choice(hits)
 
     return {"name": pick, "url": prefix + quote(pick)}
+
+
+def _wardrobe_items():
+    """옷장에 실제로 걸려 있는 옷들. [{key,label,file,...}]"""
+    conf = (AVATAR.model or {}).get("wardrobe_dir", "static/wardrobe")
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), conf)
+
+    try:
+        with open(os.path.join(base, "wardrobe.json"), encoding="utf-8") as f:
+            items = json.load(f).get("items", [])
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        print(f"[옷장 읽기 오류]: {e}")
+        return []
+
+    return [it for it in items
+            if it.get("file")
+            and os.path.exists(os.path.join(base, it["file"]))]
+
+
+def _wardrobe_now():
+    """프롬프트에 적을 옷 목록."""
+    return [{"key": it.get("key"), "label": it.get("label") or it.get("key")}
+            for it in _wardrobe_items()]
+
+
+def _worn_now():
+    """지금 입고 있는 옷 이름. 벗었으면 None.
+
+    처음 온 사람(칸이 없음)은 기본 옷을 입는 것으로 본다 —
+    /api/wardrobe 가 그렇게 입히기 때문에 여기서도 같아야 한다.
+    안 맞추면 프롬프트만 '벗고 있다' 고 알게 된다.
+    """
+    worn = memory_manager.load_wearing()
+    keys = [it.get("key") for it in _wardrobe_items()]
+
+    if worn is None:
+        return keys[0] if keys else None
+
+    return worn or None
+
+
+def _apply_wear(result):
+    """답에 (옷: 교복) 이 있으면 갈아입힌다.
+
+    장소(_apply_place)와 같은 얼개다. 표시는 큐에서 걷어내고,
+    화면이 받아 쓸 수 있게 result["wear"] 에 담아 준다.
+    """
+    cues = result.get("cues")
+
+    if not isinstance(cues, list) or not cues:
+        return result
+
+    want = None
+    keep = []
+
+    for c in cues:
+        if isinstance(c, dict) and c.get("type") == "wear":
+            want = c.get("key")          # 마지막 것이 이긴다
+            continue
+        keep.append(c)
+
+    if want is None:
+        return result
+
+    result["cues"] = keep
+
+    here = _worn_now()
+    keys = [it.get("key") for it in _wardrobe_items()]
+
+    # 벗으라는 말
+    if AVATAR.wear_is_off(want):
+        if here is None:
+            return result
+        memory_manager.save_wearing("")
+        result["wear"] = {"key": ""}
+        print(f"[옷]: {here} -> 벗음")
+        return result
+
+    if want not in keys:
+        print(f"[옷]: '{want}' 은(는) 옷장에 없습니다 — 그냥 둡니다.")
+        return result
+
+    if want == here:
+        return result
+
+    memory_manager.save_wearing(want)
+    result["wear"] = {"key": want}
+    print(f"[옷]: {here or '벗은 채'} -> {want}")
+
+    return result
 
 
 def _apply_place(result):

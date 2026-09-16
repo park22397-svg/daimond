@@ -2221,6 +2221,72 @@ class VirtualAvatar:
 
         return lines
 
+    # --------------------------------------------------------
+    # 옷 — 장소와 같은 얼개다
+    #
+    # 다이아가 스스로 갈아입을 줄 알아야 한다. 사람이 단추를 눌러야만
+    # 옷이 바뀌면 옷장은 설정 창이지 사이가 아니다. [[dia-autonomy]]
+    # --------------------------------------------------------
+
+    def wear_conf(self):
+        return (self.model or {}).get("wear", {})
+
+    def wear_marker(self, text):
+        """(옷: 교복) 에서 '교복' 을 꺼낸다. 표시가 아니면 None.
+
+        괄호는 이미 떼고 안쪽만 받는다. 장소와 똑같다.
+        """
+        low = str(text or "").strip()
+
+        for head in self.wear_conf().get("markers", []):
+            if low.startswith(head):
+                return low[len(head):].strip() or None
+
+        return None
+
+    def wear_is_off(self, key):
+        """'벗기' 처럼 벗으라는 말인가."""
+        low = str(key or "").strip().lower()
+        return any(w == low or w in low
+                   for w in self.wear_conf().get("off_words", []))
+
+    def wear_note(self, worn):
+        """지금 무엇을 입고 있는지 한 줄로. 적을 것이 없으면 None."""
+        if not worn:
+            return None
+        return f"지금 입고 있는 것은 '{worn}' 이다."
+
+    def wardrobe_block(self, items, worn=None):
+        """입을 수 있는 옷을 프롬프트에 적는다. 없으면 None."""
+        if not items or not self.wear_conf().get("enabled", True):
+            return None
+
+        lines = [
+            "",
+            "--------------------------------------------------",
+            "[입을 수 있는 옷]",
+            "--------------------------------------------------",
+            "",
+            "네 옷장이다. 갈아입을 수 있는 것은 이것뿐이다.",
+            "",
+        ]
+
+        for it in items:
+            name = it if isinstance(it, str) else (it.get("label") or it.get("key"))
+            lines.append(f"- {name}" + ("   (지금 입은 것)" if name == worn else ""))
+
+        # 장소와 같은 이유로 짧게 적는다.
+        lines += [
+            "",
+            "정말로 갈아입을 때만 (옷: 교복) 처럼 적는다.",
+            "벗을 때는 (옷: 벗기) 라고 적는다.",
+            "글로만 쓰면 화면은 안 바뀐다 — 지난 이야기에는 안 적는다.",
+            "옷 이야기를 매번 꺼내지는 마라. 갈아입자고 하거나,",
+            "네가 정말 갈아입고 싶을 때만이다.",
+        ]
+
+        return lines
+
     def time_note(self, now=None, last_talk=None):
         """지금이 언제이고 얼마 만인지를 한 줄로. 적을 것이 없으면 None.
 
@@ -2658,6 +2724,8 @@ class VirtualAvatar:
         places=None,
         here=None,
         affinity=None,
+        wardrobe=None,
+        worn=None,
     ):
 
         p = self.persona
@@ -2741,6 +2809,12 @@ class VirtualAvatar:
         # 끝부분을 가장 강하게 따르므로 그만큼 말투가 흔들린다.
         if places:
             block = self.places_block(places, here)
+            if block:
+                parts += block
+
+        # 입을 수 있는 옷. 장소와 나란히 둔다 — 둘 다 '네가 할 수 있는 것' 이다.
+        if wardrobe:
+            block = self.wardrobe_block(wardrobe, worn)
             if block:
                 parts += block
 
@@ -3162,6 +3236,22 @@ DIA = VirtualAvatar(
         # 두면 그 옷은 영영 못 벗는다.
         "wardrobe": _env("WARDROBE_URL", "/static/wardrobe/"),
         "wardrobe_dir": "static/wardrobe",
+
+        # 말로 갈아입기.
+        #
+        # 장소와 같은 얼개다. 갈 수 있는 곳을 프롬프트에 적어 주고,
+        # 정말로 옮길 때만 (배경: 공원) 이라 적게 하듯이 —
+        # 입을 수 있는 옷을 적어 주고, 정말로 갈아입을 때만
+        # (옷: 교복) 이라 적게 한다.
+        #
+        # 서버가 낱말로 찾아 갈아입히지 않는다. "그 교복 예쁘다" 는
+        # 갈아입을 일이 아니다. 지금 갈아입는 것일 때만 표시가 나온다.
+        "wear": {
+            "enabled": True,
+            "markers": ["옷:", "옷 :", "갈아입기:", "갈아입다:", "입기:"],
+            # 벗는 것도 말로 된다
+            "off_words": ["벗기", "벗는다", "벗음", "없음", "맨몸"],
+        },
         # 몸/옷 겹치기.
         #
         # avatar.vrm 은 옷 아래 몸이 지워져 있어서, 옷을 잡아당기면

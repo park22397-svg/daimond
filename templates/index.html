@@ -4447,6 +4447,21 @@
             });
         }
 
+        function applyWear(w) {
+            // 서버가 '무엇을 입었다' 고 알려 온 것을 화면에 옮긴다.
+            //
+            // 이미 저장까지 끝난 뒤라 여기서 다시 적지 않는다
+            // (restoring=true). 적으면 방금 받은 값을 되쓰는 꼴이다.
+            const key = w && w.key;
+
+            if (!key) {
+                takeOffOutfit();
+                return;
+            }
+
+            wearOutfit(key, true);
+        }
+
         function takeOffOutfit(swapping) {
             if (!wearVRM) return;
 
@@ -9067,6 +9082,10 @@
                     // 말하고 나서 배경이 바뀌면 한 박자 어긋난다.
                     if (data.place) goPlace(data.place);
 
+                    // 다이아가 스스로 갈아입었다.
+                    // 서버가 이미 적어 두었으므로 화면만 따라가면 된다.
+                    if (data.wear) applyWear(data.wear);
+
                     // 같이 걷자고 했으면 발이 풀린다. 그만하자면 멈춘다.
                     if (data.walk === 'start') {
                         setWalking(true);
@@ -9387,8 +9406,9 @@
                 const data = await res.json();
 
                 if (data.place) goPlace(data.place);
+                if (data.wear) applyWear(data.wear);
 
-                // 원수 단계처럼 먼저 걸 말이 없는 사이면 조용히 넘어간다
+                // 먼저 걸 말이 없으면 조용히 넘어간다 조용히 넘어간다
                 if (data.speak && data.reply) {
 
                     showReply(

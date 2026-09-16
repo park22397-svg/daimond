@@ -132,6 +132,20 @@ def extract_cues(text):
             #
             # 갈 수 없는 곳이면 부르는 쪽에서 버린다. 없는 곳으로
             # 옮기는 시늉을 하면 말과 화면이 어긋난다.
+            # 옷 갈아입기 표시. 장소와 똑같이 다룬다.
+            want_wear = AVATAR.wear_marker(inner)
+
+            if want_wear:
+                cues.append({
+                    "at": len(out),
+                    "type": "wear",
+                    "key": want_wear,
+                })
+                i = m.end()
+                while i < n and text[i] == " " and (not out or out[-1] == " "):
+                    i += 1
+                continue
+
             want_place = AVATAR.place_marker(inner)
 
             if want_place:
@@ -882,9 +896,19 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
         print(f"[장소 읽기 오류]: {e}")
         _places, _here = [], None
 
+    # 옷장. 장소와 같은 자리에서 같은 방식으로 준다.
+    try:
+        import main as _srv
+        _wardrobe, _worn = _srv._wardrobe_now(), _srv._worn_now()
+    except Exception as e:
+        print(f"[옷장 읽기 오류]: {e}")
+        _wardrobe, _worn = [], None
+
     system_prompt = AVATAR.system_prompt(
         places=_places,
         here=_here,
+        wardrobe=_wardrobe,
+        worn=_worn,
         stage=stage,
         transition=transition,
         mood=mood_now,
@@ -977,6 +1001,18 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
         messages.append({
             "role": "system",
             "content": f"[있는 곳] {_wh}",
+        })
+
+    # 지금 무엇을 입고 있는가.
+    #
+    # 있는 곳과 같은 이유다. 안 주면 교복을 입고 있으면서
+    # "교복 입어 볼까?" 라고 한다.
+    _wr = AVATAR.wear_note(_worn)
+
+    if _wr:
+        messages.append({
+            "role": "system",
+            "content": f"[입은 옷] {_wr}",
         })
 
     # 자고 있다가 깨어났는가.
