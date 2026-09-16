@@ -202,9 +202,32 @@ def write_glb(path, gltf, blob):
 # 알맹이
 # ------------------------------------------------------------------
 
-def extract(outfit_path, base_path, name, outdir, verbose=True):
+def extract(outfit_path, base_path, name, outdir, verbose=True,
+            collar_from=1.325):
     go, bo = load_glb(outfit_path)
     say = print if verbose else (lambda *a, **k: None)
+
+    # 맨몸을 미리 읽어 둔다 — 카라를 밀어낼 때 '몸이 얼마나 굵은가' 를
+    # 알아야 하고, 아래 몸 가리기에서도 같은 것을 쓴다.
+    base_pos = base_idx = None
+    pushed = {}
+
+    if base_path and collar_from is not None:
+        gb, bb = load_glb(base_path)
+        hits = find_prims(gb, lambda nm: 'Body_00_SKIN' in nm)
+        if hits:
+            _mi, bp, _nm = hits[0]
+            base_idx = acc_read(gb, bb, bp['indices']).astype(np.int64)
+            base_pos = acc_read(gb, bb, bp['attributes']['POSITION']).astype(np.float64)
+            # 내보낼 때마다 모델이 조금 밀린다. 얼굴로 그 몫을 맞춘다.
+            fb = find_prims(gb, lambda nm: 'Face_00_SKIN' in nm)
+            fo = find_prims(go, lambda nm: 'Face_00_SKIN' in nm)
+            if fb and fo:
+                def mid(g, bin_, pr):
+                    i = acc_read(g, bin_, pr['indices']).astype(np.int64)
+                    q = acc_read(g, bin_, pr['attributes']['POSITION']).astype(np.float64)
+                    return np.median(q[np.unique(i)], axis=0)
+                base_pos = base_pos + (mid(go, bo, fo[0][1]) - mid(gb, bb, fb[0][1]))
 
     cloth = find_prims(go, lambda nm: CLOTH_MARK in nm)
     if not cloth:
@@ -236,12 +259,28 @@ def extract(outfit_path, base_path, name, outdir, verbose=True):
         remap[keep] = np.arange(len(keep))
         say('메시 %d: 정점 %d → %d 로 추림' % (mi, len(acc_read(go, bo, attrs['POSITION'])), len(keep)))
 
+        # 살 속에 박힌 정점을 밖으로 민다 (카라가 목을 파고드는 것).
+        #
+        # 굽기 **전에** 해야 한다. 자리를 옮긴 다음 그 값을 담아야
+        # 파일에 남는다.
+        if collar_from is not None and base_pos is not None:
+            src_pos = acc_read(go, bo, attrs['POSITION']).astype(np.float64)
+            src_pos = np.array(src_pos, dtype=np.float64)   # 쓰기 가능하게
+            push_out_of_body(src_pos, keep, base_pos, base_idx,
+                             collar_from, say=say)
+            pushed[attrs['POSITION']] = src_pos
+
         new_attr = {}
         for key, ai in attrs.items():
             if key.startswith('TEXCOORD') and key != 'TEXCOORD_0':
                 continue
             src = go['accessors'][ai]
-            arr = acc_read(go, bo, ai)
+            # 민 자리를 쓸 때는 **원래 자료형으로 되돌려 담는다.**
+            # float64 로 담으면 glTF 에 없는 자료형이라 터진다.
+            if ai in pushed:
+                arr = pushed[ai].astype(acc_read(go, bo, ai).dtype)
+            else:
+                arr = acc_read(go, bo, ai)
             arr = arr[keep]
             n = NCOMP[src['type']]
             dt = arr.dtype
@@ -432,6 +471,105 @@ def extract(outfit_path, base_path, name, outdir, verbose=True):
     return entry
 
 
+def push_out_of_body(pos, keep, body_pos, body_idx, from_y, margin=0.003,
+                     near=0.12, cap=0.04, say=print):
+    """몸 속에 박힌 옷 정점을 살 밖으로 밀어낸다.
+
+    왜 필요한가
+    ----------
+    교복 카라가 목을 파고들어 있었다. 재 보니 카라 안쪽 반지름이 21mm 인데
+    그 높이 목 반지름이 62mm 다 — 40mm 나 살 속에 들어가 있었다.
+    VRoid 에서 카라 크기가 몸에 비해 작게 잡힌 것이라, 화면에서는
+    목이 카라를 뚫고 나온 것처럼 보인다.
+
+    **목을 늘려도 안 낫는다.** 굵기 차이는 그대로이기 때문이다.
+
+    어떻게
+    ------
+    통째로 키우면 모양이 망가진다(카라 반지름이 21~83mm 로 들쭉날쭉하다).
+    **살 속에 박힌 정점만** 그 높이 몸 반지름 + 여유 만큼 바깥으로 민다.
+    이미 밖에 있는 정점은 건드리지 않으므로 옷 모양이 남는다.
+
+    몸을 세로축(y) 둘레의 기둥으로 보고 높이·각도별 반지름을 재 둔다.
+    목처럼 둥근 자리에서는 이 근사로 충분하다.
+    """
+    body_used = np.unique(body_idx)
+    bv = body_pos[body_used]
+
+    # ★ 목 기둥만 본다.
+    #
+    #   처음에는 그 높이 몸 정점을 통째로 봤다가 **어깨 반지름을 목
+    #   반지름으로 잡아 카라가 35cm 날아갔다.** y 1.32 아래는 어깨로
+    #   벌어지는 자리(반지름 89~118mm)이고, 목 자체는 60~73mm 다.
+    #   가로로 near(12cm) 안쪽만 남기면 어깨가 빠진다.
+    bv = bv[np.hypot(bv[:, 0], bv[:, 2]) < near]
+
+    # 그 높이·그 방향에서 몸이 얼마나 굵은가
+    YSTEP = 0.005                      # 5mm 칸
+    ABINS = 24                         # 15도 칸
+
+    table = {}
+
+    for v in bv:
+        if v[1] < from_y - 0.05:
+            continue
+        yi = int(round(v[1] / YSTEP))
+        ai = int(((np.arctan2(v[2], v[0]) + np.pi) / (2 * np.pi)) * ABINS) % ABINS
+        r = float(np.hypot(v[0], v[2]))
+        if r > table.get((yi, ai), 0.0):
+            table[(yi, ai)] = r
+
+    def body_radius(v):
+        """그 자리에서 몸 반지름. 이웃 칸까지 봐서 가장 큰 값."""
+        yi = int(round(v[1] / YSTEP))
+        ai = int(((np.arctan2(v[2], v[0]) + np.pi) / (2 * np.pi)) * ABINS) % ABINS
+        best = 0.0
+        for dy in (-1, 0, 1):
+            for da in (-1, 0, 1):
+                r = table.get((yi + dy, (ai + da) % ABINS), 0.0)
+                if r > best:
+                    best = r
+        return best
+
+    moved = 0
+    worst = 0.0
+
+    for vi in keep:
+        v = pos[vi]
+        if v[1] < from_y:
+            continue
+
+        r = float(np.hypot(v[0], v[2]))
+
+        # 목을 감싸는 정점만. 어깨에 걸친 부분은 그대로 둔다.
+        if r >= near:
+            continue
+
+        need = body_radius(v) + margin
+
+        if r >= need or need <= margin:
+            continue
+
+        if r < 1e-6:
+            continue                   # 축 위의 정점은 방향이 없다
+
+        # 한 번에 이만큼 넘게는 안 민다. 재는 데 실수가 있어도
+        # 옷이 날아가지는 않게 하는 빗장이다.
+        if need - r > cap:
+            need = r + cap
+
+        k = need / r
+        pos[vi, 0] *= k
+        pos[vi, 2] *= k
+        moved += 1
+        worst = max(worst, (need - r) * 1000)
+
+    say('카라 밀어내기: 정점 %d개를 살 밖으로 (가장 많이 민 것 %.1fmm)'
+        % (moved, worst))
+
+    return moved
+
+
 def body_mask(base_path, outfit_path, say=print):
     """맨몸에서 감출 삼각형을 찾는다.
 
@@ -479,14 +617,49 @@ def body_mask(base_path, outfit_path, say=print):
         off = ao - ab
 
     keep_o = np.unique(io)
-    have = {}
-    for v in np.round(po[keep_o] - off, 5):
-        have[tuple(v)] = True
-
     base_used = np.unique(ib)
+
+    # 없어진 정점 찾기 — **거리로 재야 한다.**
+    #
+    # ★ 처음에는 소수점 다섯 자리로 반올림해 같은 값인지 봤다. 그랬더니
+    #   **손이 통째로 사라진 것으로 잡혔다.** 두 파일의 손 정점은 0.0005mm
+    #   차이로 사실상 같은데, 반올림 경계를 사이에 두고 갈라지면 다른 칸에
+    #   떨어져 "없다" 가 된다. 그 삼각형 161개가 감춰져 **손등에 구멍이
+    #   뚫렸고**, 구멍 너머 살 안쪽이 검붉게 비쳐 '갈색 네모' 로 보였다.
+    #
+    #   진짜로 지워진 정점은 몇 cm 씩 떨어져 있으므로 0.1mm 만 허용해도
+    #   충분히 갈린다(실측: 남아 있는 것 최대 0.0005mm, 지워진 것 최대 118mm).
+    #
+    #   scipy 없이 하려고 0.1mm 격자에 담고 이웃 27칸까지 본다.
+    #   격자 하나만 보면 반올림과 똑같은 함정에 다시 빠진다.
+    CELL = 0.0001                      # 0.1mm
+
+    have = {}
+    for v in po[keep_o] - off:
+        have.setdefault(tuple(np.floor(v / CELL).astype(np.int64)), []).append(v)
+
+    NEIGH = [(i, j, k)
+             for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)]
+
+    TOL2 = (0.0005) ** 2               # 0.5mm 안이면 같은 정점으로 본다
+
     gone = np.zeros(len(pb), dtype=bool)
+
     for vi in base_used:
-        if tuple(np.round(pb[vi], 5)) not in have:
+        v = pb[vi]
+        cell = np.floor(v / CELL).astype(np.int64)
+        found = False
+
+        for dx, dy, dz in NEIGH:
+            for w in have.get((cell[0] + dx, cell[1] + dy, cell[2] + dz), ()):
+                if ((w[0] - v[0]) ** 2 + (w[1] - v[1]) ** 2
+                        + (w[2] - v[2]) ** 2) <= TOL2:
+                    found = True
+                    break
+            if found:
+                break
+
+        if not found:
             gone[vi] = True
 
     tris = ib.reshape(-1, 3)
@@ -518,11 +691,15 @@ def main():
                     help='맨몸 VRM (몸 가리기 계산에 쓴다)')
     ap.add_argument('--name', help='옷 이름. 안 주면 파일 이름에서 딴다')
     ap.add_argument('--out', default=os.path.join(HERE, 'static', 'wardrobe'))
+    ap.add_argument('--collar-from', type=float, default=1.325,
+                    help='이 높이(m) 위의 옷 정점을 살 밖으로 민다. '
+                         '끄려면 음수를 준다')
     a = ap.parse_args()
 
     name = a.name or os.path.splitext(os.path.basename(a.outfit))[0]
     entry = extract(a.outfit, a.base if os.path.exists(a.base) else None,
-                    name, a.out)
+                    name, a.out,
+                    collar_from=(None if a.collar_from < 0 else a.collar_from))
 
     # wardrobe.json 에 적는다. 같은 이름이면 갈아 끼운다.
     book = os.path.join(a.out, 'wardrobe.json')
