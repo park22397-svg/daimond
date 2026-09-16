@@ -360,40 +360,19 @@ def update_relationship(user_text):
     )
 
     prev_key = saved.get("stage")
-    devotion_raw = saved.get("devotion_raw", 0)
     lover = bool(saved.get("lover", False))
 
     try:
         here = AVATAR.stage(prev_key) if prev_key else None
         delta = AVATAR.score_message(user_text)
 
-        # 눈금이 꽉 찼는데도 잘해 주면 그 마음은 갈 데가 없다.
-        # 넘친 만큼을 따로 모은다. 100이 모여야 순종 1이 된다.
-        # 천장에 막혀 있으면 넘칠 것도 없다
-        if lover:
-            devotion_raw += AVATAR.devotion_overflow(affinity, delta, here)
-
-        # 얀데레처럼 되돌아가지 않는 단계에서는 깎이지 않는다.
-        # 연인이 아니면 광기 앞에서 멈춘다.
-        affinity = AVATAR.apply_delta(
-            affinity, delta, here, lover=lover,
-            friends=bool(saved.get("friends", False))
-            if isinstance(saved, dict) else False)
+        affinity = AVATAR.apply_delta(affinity, delta, here, lover=lover)
 
     except Exception as e:
         print(f"[관계 점수 계산 오류]: {e}")
 
     stage = AVATAR.next_stage(affinity, prev_key,
                               AVATAR.gate_grants(saved))
-
-    # 아직 말을 안 놓았으면 존댓말로 되돌린다.
-    #
-    # 단계 표에는 친구부터 '반말' 이라 적혀 있지만, 말은 누가 놓자고
-    # 하고 상대가 받아야 놓는 것이다. 말투를 보는 자리가 열두 군데라
-    # **여기 한 곳에서 갈라 준다** — 한 군데만 빠뜨려도 거기서만
-    # 반말이 튀어나온다.
-    stage = AVATAR.speaking_stage(
-        stage, bool((load_relationship() or {}).get("friends", False)))
 
     transition = None
     if prev_key and prev_key != stage.key:
@@ -402,7 +381,17 @@ def update_relationship(user_text):
             transition = before.label
 
     try:
-        save_relationship(affinity, stage.key, devotion_raw, lover)
+        # 연인인데 호감이 바닥나면 저절로 헤어진다.
+        #
+        # 사람은 미워하면서 사귀지 않는다. 다만 친구로는 남는다 —
+        # 갈 곳이 거기뿐이기도 하다. 헤어졌다는 말은 다음 답에 얹는다.
+        if lover and AVATAR.breakup_faded(affinity, lover):
+            lover = False
+            stage = AVATAR.next_stage(
+                affinity, stage.key, AVATAR.gate_grants(saved, lover=False))
+            print(f"[이별]: 호감이 {affinity} 까지 떨어져 저절로 끝났습니다.")
+
+        save_relationship(affinity, stage.key, 0, lover)
     except Exception as e:
         print(f"[관계 저장 오류]: {e}")
 
@@ -764,51 +753,6 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
     # 고백보다 **먼저** 본다. 말을 놓아야 친구고, 친구가 되어야
     # 그다음으로 넘어간다.
     # ----------------------------------------------------------
-
-    if AVATAR.is_befriend(user_text):
-        try:
-            _saved = load_relationship() or {}
-            _friends = bool(_saved.get("friends", False))
-            _aff = _saved.get(
-                "affinity", AVATAR.relationship.get("start_affinity", 0))
-
-            # 이미 놓았으면 받아들이는 쪽으로(그때 대사가 다르다).
-            # 아직이면 사이를 본다.
-            _ok = _friends or AVATAR.befriend_accepts(
-                _aff, AVATAR.gate_grants(_saved))
-
-            r = AVATAR.befriend_reply(_ok, stage)
-
-            if _ok and not _friends:
-                _aff = AVATAR.clamp_affinity(
-                    _aff + r["affinity"], lover=bool(_saved.get("lover")),
-                    friends=True)
-
-                stage = AVATAR.next_stage(_aff, stage.key)
-
-                save_relationship(_aff, stage.key,
-                                  _saved.get("devotion_raw", 0),
-                                  _saved.get("lover", False),
-                                  friends=True)
-
-                affinity_now = _aff
-
-                print(f"[친구]: 말을 놓았습니다. 호감 {_aff}.")
-
-            elif not _ok:
-                print("[친구]: 아직 이르다")
-
-            if r["line"]:
-                return done(
-                    r["line"],
-                    expression=r["expression"],
-                    motion=r.get("motion"),
-                )
-
-        except Exception as e:
-            print(f"[친구 처리 오류]: {e}")
-
-    # ----------------------------------------------------------
     # 끝말잇기
     #
     # **규칙은 서버가 쥔다.** 모델에게 맡기면 없는 낱말을 지어내고
@@ -841,7 +785,7 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
                     _aff + r["affinity_delta"], lover=True)
                 stage = AVATAR.next_stage(_aff, stage.key)
                 save_relationship(_aff, stage.key,
-                                  _saved.get("devotion_raw", 0), True)
+                                  0, True)
                 affinity_now = _aff
                 print(f"[고백]: 받아들였습니다. 이제 연인이고, "
                       f"호감이 {_aff} 로 올랐습니다.")
@@ -859,50 +803,43 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
             print(f"[고백 처리 오류]: {e}")
 
     # ----------------------------------------------------------
-    # 아이
+    # 이별
     #
-    # 고백과 같은 이유로 모델에게 맡기지 않는다. 아이를 갖겠다는 말은
-    # 그때그때 문장으로 정할 일이 아니라 사이가 정하는 것이고,
-    # 그 말 뒤로는 몸으로 하는 일의 뜻이 달라지기 때문이다.
+    # 고백과 같은 이유로 모델에게 맡기지 않는다. 헤어지자는 말은
+    # 그때그때 문장으로 정할 일이 아니다 — 그 말 한마디로 사이가
+    # 통째로 달라지고, 그 뒤의 모든 말투가 거기서 갈린다.
     #
-    # 순종의 마지막 칸(50)에 닿아야 받아들인다.
+    # 헤어져도 친구로는 남는다. 갈 곳이 거기뿐이기도 하다.
     # ----------------------------------------------------------
 
-    if AVATAR.is_child_talk(user_text):
+    if AVATAR.is_breakup(user_text):
         try:
             _saved = load_relationship() or {}
-            _wants = bool(_saved.get("wants_child", False))
-            _preg = bool(_saved.get("pregnant", False))
+            _lover = bool(_saved.get("lover", False))
             _aff = _saved.get(
                 "affinity", AVATAR.relationship.get("start_affinity", 0))
-            _dev = AVATAR.devotion_level(_saved.get("devotion_raw", 0))
 
-            r = AVATAR.child_reply(stage, _dev, _wants, _preg)
+            r = AVATAR.breakup_reply(_lover, "said")
 
-            if r["accepted"]:
-                _aff = AVATAR.clamp_affinity(
-                    _aff + r["affinity_delta"],
-                    lover=bool(_saved.get("lover", False)))
-                stage = AVATAR.next_stage(_aff, stage.key)
-                save_relationship(_aff, stage.key,
-                                  _saved.get("devotion_raw", 0),
-                                  _saved.get("lover", False),
-                                  wants_child=True)
+            if r["broke"]:
+                _aff = AVATAR.clamp_affinity(_aff + r["affinity"], lover=False)
+                stage = AVATAR.next_stage(
+                    _aff, stage.key, AVATAR.gate_grants(_saved, lover=False))
+                save_relationship(_aff, stage.key, 0, False)
                 affinity_now = _aff
-                print(f"[아이]: 그러겠다고 답했습니다. 순종 {_dev}.")
+                print(f"[이별]: 헤어졌습니다. 이제 친구이고, 호감 {_aff}.")
             else:
-                print(f"[아이]: 순종 {_dev} — "
-                      f"{'이미 말했다' if _wants else '아직 이르다'}")
+                print("[이별]: 연인이 아니다")
 
-            if r["reply"]:
+            if r["line"]:
                 return done(
-                    r["reply"],
+                    r["line"],
                     expression=r["expression"],
                     motion=r.get("motion"),
                 )
 
         except Exception as e:
-            print(f"[아이 처리 오류]: {e}")
+            print(f"[이별 처리 오류]: {e}")
 
     # 입을 닫은 단계에서는 모델을 부르지 않는다.
     #
@@ -935,12 +872,6 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
         print(f"[기억 불러오기 오류]: {e}")
         history = []
 
-    try:
-        devotion = AVATAR.devotion_level(
-            (load_relationship() or {}).get("devotion_raw", 0))
-    except Exception:
-        devotion = 0
-
     _rel = load_relationship() or {}
 
     # 갈 수 있는 곳은 배경 폴더가 정한다. 파일을 넣으면 곳이 는다.
@@ -956,11 +887,10 @@ def process_chat(user_text, seeing=None, cut_off=False, woke=False):
         here=_here,
         stage=stage,
         transition=transition,
-        devotion=devotion,
         mood=mood_now,
         lover=bool(_rel.get("lover", False)),
-        # 아이를 가졌다는 것은 몸이 아니라 프롬프트로 드러난다
-        pregnant=bool(_rel.get("pregnant", False)),
+        # 같은 친구라도 살가운 날이 있고 시무룩한 날이 있다
+        affinity=_rel.get("affinity"),
     )
     if user_name:
         system_prompt += "\n" + AVATAR.address_block(user_name)
@@ -1315,8 +1245,7 @@ def keep_talking():
         "content": AVATAR.system_prompt(
             stage=stage,
             transition=None,
-            devotion=AVATAR.devotion_level(saved.get("devotion_raw", 0)),
-            pregnant=bool(saved.get("pregnant", False)),
+            affinity=saved.get("affinity"),
         ),
     }]
 

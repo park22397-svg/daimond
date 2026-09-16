@@ -45,10 +45,7 @@ def _stage_now(affinity, before=None):
     saved = memory_manager.load_relationship() or {}
     grants = AVATAR.gate_grants(saved)
 
-    st = AVATAR.next_stage(affinity, before, grants)
-
-    # 옛 기억에 '친구' 가 적혀 있는데 말은 안 놓은 짝이 남아 있을 수 있다.
-    return AVATAR.speaking_stage(st, grants.get("friends", False))
+    return AVATAR.next_stage(affinity, before, grants)
 
 
 def _stage_label(stage):
@@ -713,10 +710,6 @@ def relationship_api():
         mood = AVATAR.mood_now(_m.get("raw", 0), _m.get("since"), _t.time())
         mood_tier = AVATAR.mood_tier(mood)
 
-        raw = saved.get("devotion_raw", 0)
-        level = AVATAR.devotion_level(raw)
-        tier = AVATAR.devotion_tier(level)
-
         return jsonify(
             {
                 "affinity": affinity,
@@ -724,17 +717,10 @@ def relationship_api():
                 "label": _stage_label(stage),
                 "speech": stage.speech,
                 "attitude": stage.attitude,
-                # 상한을 넘어 쌓인 마음
-                "devotion": level,
-                "devotion_raw": raw,
-                "devotion_label": tier.get("label") if tier else None,
-                # 연인인가. 아니면 호감이 광기 앞에서 멈춘다.
+                # 사귀는 사이인가
                 "lover": bool(saved.get("lover", False)),
-
-                # 아이. 창을 다시 열어도 배가 그대로여야 한다.
-                "wants_child": bool(saved.get("wants_child", False)),
-                "climax": int(saved.get("climax", 0)),
-                "pregnant": bool(saved.get("pregnant", False)),
+                # 같은 친구라도 오늘은 어떤 온도인가
+                "warmth": AVATAR.warmth_label(affinity),
                 "ceiling": AVATAR.confess_ceiling(),
                 # 지금 상해 있는가
                 "mood": mood,
@@ -850,114 +836,6 @@ def touch_api():
                     and zone.key == kc.get("zone")):
                 kind = "kiss"
 
-        # ----------------------------------------------------------
-        # 몸을 섞는 것
-        #
-        # 손가락은 입과 보지에서만 다른 것이 된다(TouchTool.label_for).
-        # 그 자리를 그 도구로, 하의를 벗긴 채로 만졌을 때만이다.
-        #
-        # 화면은 무엇을 벗겼는지만 보낸다(undressed).
-        # 어느 자리를 만졌는지 아는 쪽이 여기라서 판정은 여기서 한다.
-        # ----------------------------------------------------------
-        sx = AVATAR.sex_conf()
-
-        undressed = data.get("undressed")
-        if not isinstance(undressed, list):
-            undressed = []
-
-        is_sex = bool(
-            sx.get("enabled")
-            and tool is not None
-            and tool.key == sx.get("tool")
-            and zone.key == sx.get("zone")
-            and all(z in undressed for z in sx.get("needs_undressed", []))
-        )
-
-        result = AVATAR.touch_reaction(
-            zone,
-            kind,
-            stage,
-            affinity,
-            count=count,
-            tool=tool,
-        )
-
-        if result is None:
-            return jsonify({"hit": False, "bone": bone})
-
-        # ----------------------------------------------------------
-        # 절정
-        #
-        # 한 번 만질 때마다 하나씩 쌓이고, 문턱을 넘으면 절정에 이른다.
-        # 넘은 뒤에는 0으로 돌아간다.
-        #
-        # 절정을 정해진 횟수만큼 겪고, 그 전에 아이를 갖겠다고 말한
-        # 뒤라면 아이가 선다. 말한 적이 없으면 몇 번을 겪어도 서지 않는다 —
-        # 이것은 몸이 아니라 약속이 정하는 일이다.
-        #
-        # 세는 값을 저장에 두는 이유: 창을 닫았다 열어도 이어져야 한다.
-        # ----------------------------------------------------------
-        sex_strokes = None
-        sex_climax = None
-        sex_pregnant = None
-
-        if is_sex and result.get("allowed"):
-            sex_strokes = int(saved.get("strokes", 0)) + 1
-            sex_climax = int(saved.get("climax", 0))
-            sex_pregnant = bool(saved.get("pregnant", False))
-            wants = bool(saved.get("wants_child", False))
-
-            result["kind"] = "sex"
-
-            if sex_strokes >= int(sx.get("climax_strokes", 8)):
-                sex_strokes = 0
-                sex_climax += 1
-
-                peak = AVATAR.climax_reaction(stage)
-                result["reply"] = peak["reply"]
-                result["expression"] = peak["expression"]
-                result["motion"] = peak["motion"]
-                result["expression_then"] = None
-                result["affinity_delta"] = int(sx.get("climax_affinity", 10))
-                result["climaxed"] = True
-
-                if (not sex_pregnant and wants
-                        and sex_climax >= int(sx.get("to_pregnant", 5))):
-                    sex_pregnant = True
-                    result["pregnant_now"] = True
-                    print(f"[아이]: 절정 {sex_climax}번 — 아이가 섰습니다.")
-                else:
-                    print(f"[절정]: {sex_climax}번째"
-                          f"{'' if wants else ' (아이를 갖겠다는 말은 아직 없다)'}")
-
-            result["strokes"] = sex_strokes
-            result["climax"] = sex_climax
-            result["pregnant"] = sex_pregnant
-
-        # 옷을 여러 번 잡아당기면 옷이 실제로 끌려온다.
-        # 한두 번은 말로만 하고, 그 뒤부터 몸이 따라간다.
-        if zone.cloth and kind == "pet":
-            cfg = AVATAR.touch.get("cloth_tug", {})
-            need = cfg.get("from", 3)
-
-            if count >= need:
-                over = count - need + 1
-                scale = min(over * 0.35 + 1.0, cfg.get("max_scale", 1.8))
-                result["tug"] = {
-                    "zone": zone.key,
-                    "distance": round(cfg.get("distance", 0.045) * scale, 4),
-                    "pulls": count,
-                }
-
-        # 입을 닫은 단계에서는 만져도 말하지 않는다.
-        # 대화에는 답하지 않으면서 손만 대면 재잘거리면 앞뒤가 안 맞는다.
-        if getattr(stage, "silent", False):
-            conf = AVATAR.relationship.get("silence", {})
-            result["reply"] = ""
-            result["expression"] = conf.get("expression", "angry")
-            result["motion"] = None
-            result["silent"] = True
-
         # 기분을 풀거나 상하게 한다.
         #
         # 쓰다듬으면 풀리고, 아직 허락 안 된 곳을 만지면 더 상한다.
@@ -999,20 +877,12 @@ def touch_api():
         # 그때는 개체가 '어느 값까지 떨어질지'를 직접 알려준다.
         # 얀데레처럼 더는 식지 않는 단계라면 그것도 깎이지 않는다.
         drop_to = result.get("affinity_to")
-        devotion_raw = saved.get("devotion_raw", 0)
 
         if drop_to is not None and not getattr(stage, "never_falls", False):
             affinity = AVATAR.clamp_affinity(drop_to)
             print(f"[만지기]: 허락되지 않은 자리 — 친밀도를 {affinity} 로 떨어뜨립니다.")
         else:
-            # 눈금이 꽉 찼는데도 잘해 주면 그 마음은 갈 데가 없다.
-            # 넘친 만큼을 따로 모은다. 100이 모여야 순종 1이 된다.
-            # 연인이 아니면 광기 앞에서 멈춘다
             lover = bool(saved.get("lover", False))
-
-            if lover:
-                devotion_raw += AVATAR.devotion_overflow(
-                    affinity, result["affinity_delta"], stage)
 
             affinity = AVATAR.apply_delta(
                 affinity,
@@ -1024,11 +894,8 @@ def touch_api():
         stage = _stage_now(affinity, before)
 
         try:
-            save_relationship(affinity, stage.key, devotion_raw,
-                              bool(saved.get("lover", False)),
-                              strokes=sex_strokes,
-                              climax=sex_climax,
-                              pregnant=sex_pregnant)
+            save_relationship(affinity, stage.key, 0,
+                              bool(saved.get("lover", False)))
         except Exception as e:
             print(f"[만지기 관계 저장 오류]: {e}")
 
@@ -1064,9 +931,6 @@ def touch_api():
                 "stage": stage.key,
                 "stage_label": _stage_label(stage),
                 "changed_from": before if before != stage.key else None,
-                "pregnant": bool(
-                    sex_pregnant if sex_pregnant is not None
-                    else saved.get("pregnant", False)),
             }
         )
 
@@ -1336,30 +1200,32 @@ def first_talk_api():
             saved.get("stage")
         )
 
-        # 말 놓자고 먼저 꺼낸다.
+        # 사귀자고 먼저 꺼낸다.
         #
-        # 호감은 친구 자리에 닿았는데 아직 서로 존댓말이면, 사람이
-        # 먼저 말해 주기를 마냥 기다리지 않는다. 한 번 물어본다.
-        # 받아들이는 것은 상대 몫이라 여기서 친구가 되지는 않는다.
-        if (not saved.get("friends")
-                and AVATAR.befriend_accepts(
-                    affinity, AVATAR.gate_grants(saved))
-                and not saved.get("asked_friend")):
+        # 호감이 충분히 쌓였는데 상대가 아무 말이 없으면, 마냥 기다리지
+        # 않는다. 한 번 말해 본다 — 기다리기만 하는 것은 자율사고가
+        # 아니다. 받아들이는 것은 상대 몫이라 여기서 연인이 되지는 않는다.
+        #
+        # 한 번만 묻는다(asked_lover). 물을 때마다 조르면 사람이 아니라
+        # 알림이 된다.
+        if (not saved.get("lover")
+                and AVATAR.confess_asks(affinity, AVATAR.gate_grants(saved))
+                and not saved.get("asked_lover")):
 
-            ask = AVATAR.befriend_ask(stage)
+            ask = AVATAR.confess_ask()
 
             if ask.get("line"):
                 d = memory_manager.load_memory_data()
                 d["relationship"] = dict(d.get("relationship") or {},
-                                         asked_friend=True)
+                                         asked_lover=True)
                 memory_manager.save_memory_data(d)
 
                 try:
                     append_message("assistant", ask["line"])
                 except Exception as e:
-                    print(f"[친구 묻기 저장 오류]: {e}")
+                    print(f"[고백 묻기 저장 오류]: {e}")
 
-                print("[친구]: 먼저 물었습니다.")
+                print("[고백]: 먼저 말했습니다.")
 
                 return jsonify({
                     "speak": True,
@@ -1653,175 +1519,6 @@ def see_api():
 
 
 @app.route(
-    "/api/suggest",
-    methods=["POST"]
-)
-def suggest_api():
-    """지금 흐름에 맞는 행동 보기를 몇 개 지어 준다.
-
-    짓는 것은 모델이지만 고르는 것은 사람이다.
-    클릭하지 않으면 아무 일도 일어나지 않는다.
-    """
-
-    try:
-        import requests
-
-        from config import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_OPTIONS, OLLAMA_THINK
-        from memory_manager import load_memory, load_relationship
-
-        conf = (AVATAR.behavior or {}).get("suggest", {})
-        if not conf.get("enabled", True):
-            return jsonify({"ok": True, "items": []})
-
-        saved = load_relationship() or {}
-        _g = AVATAR.gate_grants(saved)
-        stage = AVATAR.speaking_stage(
-            AVATAR.stage(saved.get("stage"))
-            or AVATAR.stage_for_affinity(saved.get("affinity", 0), _g),
-            bool(saved.get("friends")))
-
-        count = int(conf.get("count", 4))
-
-        # 방금 나눈 이야기만 준다. 길게 주면 옛 흐름을 짚는다.
-        history = load_memory() or []
-        recent = [
-            {"role": m["role"], "content": str(m["content"]).strip()}
-            for m in history[-6:]
-            if isinstance(m, dict) and m.get("role") in ("user", "assistant")
-        ]
-
-        ask = conf.get("prompt", "").format(count=count, name=AVATAR.name)
-
-        msgs = [{
-            "role": "system",
-            "content": (
-                f"너는 {AVATAR.name}(와)과 상대가 나누는 이야기를 옆에서 보고 "
-                f"있다. 지금 사이는 '{stage.label}' 이다.\n\n" + ask
-            ),
-        }]
-        msgs += recent
-        msgs.append({"role": "user", "content": ask})
-
-        payload = {
-            "model": OLLAMA_MODEL,
-            "messages": msgs,
-            "stream": False,
-            "options": dict(OLLAMA_OPTIONS),
-        }
-        if OLLAMA_THINK is not None:
-            payload["think"] = OLLAMA_THINK
-
-        r = requests.post(OLLAMA_URL, json=payload, timeout=60)
-        if r.status_code != 200:
-            return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 502
-
-        raw = ((r.json().get("message") or {}).get("content") or "")
-
-        drop = conf.get("drop", [])
-        cap = int(conf.get("max_len", 30))
-
-        items = []
-        for line in raw.split("\n"):
-            t = line.strip().strip("-*·•").strip()
-
-            # 번호를 떼어 낸다
-            while t and (t[0].isdigit() or t[0] in ".)]、,"):
-                t = t[1:].lstrip()
-
-            t = t.strip("()（）[]「」\"'").strip()
-
-            if not t or len(t) > cap:
-                continue
-            if any(w in t for w in drop):
-                continue
-            if t in items:
-                continue
-
-            items.append(t)
-            if len(items) >= count:
-                break
-
-        return jsonify({"ok": True, "items": items})
-
-    except Exception as e:
-        print(f"[상황 보기 오류]: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-@app.route(
-    "/api/child",
-    methods=["GET", "POST"]
-)
-def child_api():
-    """아이에 관한 값을 보고, 맞춘다. 시험용이다.
-
-    절정 다섯 번을 손으로 채우지 않고도 배가 부른 모습을 봐야
-    배 모양(pregnancy.spine_scale)을 눈으로 맞출 수 있다.
-
-    POST 로 보낼 수 있는 것 (안 적은 것은 그대로 둔다):
-      wants_child : 아이를 갖겠다고 말했는가
-      climax      : 절정을 몇 번 겪었는가
-      strokes     : 절정까지 얼마나 왔는가
-      pregnant    : 아이가 섰는가
-      devotion    : 순종 (0~50). raw 로 바꿔서 넣는다
-    """
-
-    try:
-        from memory_manager import load_relationship, save_relationship
-
-        saved = load_relationship() or {}
-
-        if request.method == "POST":
-            data = request.get_json(silent=True) or {}
-
-            def pick(key, cast):
-                v = data.get(key)
-                return None if v is None else cast(v)
-
-            devotion = data.get("devotion")
-            devotion_raw = None
-            if devotion is not None:
-                per = AVATAR.devotion_conf().get("per_point", 100)
-                devotion_raw = int(devotion) * per
-
-            save_relationship(
-                saved.get("affinity", 0),
-                saved.get("stage", "distant"),
-                devotion_raw=devotion_raw,
-                lover=None,
-                wants_child=pick("wants_child", bool),
-                strokes=pick("strokes", int),
-                climax=pick("climax", int),
-                pregnant=pick("pregnant", bool),
-            )
-            saved = load_relationship() or {}
-
-        sx = AVATAR.sex_conf()
-        raw = saved.get("devotion_raw", 0)
-
-        return jsonify({
-            "ok": True,
-            "wants_child": bool(saved.get("wants_child", False)),
-            "strokes": int(saved.get("strokes", 0)),
-            "climax": int(saved.get("climax", 0)),
-            "pregnant": bool(saved.get("pregnant", False)),
-            "devotion": AVATAR.devotion_level(raw),
-            "devotion_raw": raw,
-
-            # 무엇이 얼마나 남았는지 화면이 적어 줄 수 있게
-            "need_strokes": int(sx.get("climax_strokes", 8)),
-            "need_climax": int(sx.get("to_pregnant", 5)),
-            "need_devotion": AVATAR.child_conf().get("devotion", 50),
-            "need_stage": AVATAR.child_conf().get("stage", "yandere"),
-            "stage": saved.get("stage"),
-        })
-
-    except Exception as e:
-        print(f"[아이 창구 오류]: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-@app.route(
     "/api/relationship/reset",
     methods=["POST"]
 )
@@ -1843,13 +1540,11 @@ def relationship_reset_api():
         before = load_relationship() or {}
         stage = _stage_now(target, None)
 
-        # 순종은 상한을 넘어 넘친 호감이 쌓인 것이다.
-        # 호감을 처음으로 돌리면서 이것만 남기면 앞뒤가 안 맞는다.
         # 사이를 처음으로 돌리면 연인이었던 것도 없던 일이 된다
         save_relationship(target, stage.key, 0, False)
 
         print(f"[호감도 되돌리기]: {before.get('affinity')} -> {target} "
-              f"({stage.label}), 순종 {before.get('devotion_raw', 0)} -> 0")
+              f"({stage.label})")
 
         return jsonify(
             {
@@ -1859,7 +1554,6 @@ def relationship_reset_api():
                 "stage_label": _stage_label(stage),
                 "before": before.get("affinity"),
                 "before_stage": before.get("stage"),
-                "devotion_cleared": before.get("devotion_raw", 0),
                 "start": start,
             }
         )
@@ -2747,9 +2441,7 @@ def _go_stage():
     rel = memory_manager.load_relationship() or {}
     grants = AVATAR.gate_grants(rel)
 
-    return AVATAR.speaking_stage(
-        AVATAR.stage_for_affinity(rel.get("affinity", 0), grants),
-        grants.get("friends", False))
+    return AVATAR.stage_for_affinity(rel.get("affinity", 0), grants)
 
 
 def _go_bump(delta):
@@ -2979,6 +2671,46 @@ def gomoku_resign_api():
 # static/background/ 를 훑어 쓸 수 있는 이미지를 알려준다.
 # 파일을 넣고 화면만 새로 고치면 바뀌도록, 목록을 코드에 적지 않는다.
 # ============================================================
+
+@app.route("/api/wardrobe")
+def wardrobe_api():
+    """옷장에 무엇이 걸려 있는가.
+
+    목록을 코드에 적지 않는다. 배경과 같은 이치다 —
+    `_extract_garment.py` 로 옷을 구우면 wardrobe.json 에 한 줄이 늘고,
+    화면을 새로 고치면 그 옷이 옷장에 걸린다. 서버를 껐다 켤 필요 없다.
+
+    옷 하나는 '옷만 든 작은 VRM' 이다(교복 한 벌 1.4MB). 통짜 아바타를
+    옷 수만큼 두면 한 벌에 16MB 다.
+    """
+
+    conf = (AVATAR.model or {}).get("wardrobe_dir", "static/wardrobe")
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), conf)
+    book = os.path.join(base, "wardrobe.json")
+
+    items = []
+
+    try:
+        with open(book, encoding="utf-8") as f:
+            items = json.load(f).get("items", [])
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"[옷장 읽기 오류]: {e}")
+
+    # 파일이 실제로 있는 것만 준다.
+    # json 에는 남았는데 파일을 지운 경우, 화면에서 눌러도 404 만 난다.
+    live = []
+
+    for it in items:
+        name = it.get("file") or ""
+        if name and os.path.exists(os.path.join(base, name)):
+            live.append(it)
+        else:
+            print(f"[옷장] 파일이 없어 건너뜀: {name}")
+
+    return jsonify({"ok": True, "items": live})
+
 
 @app.route("/api/background")
 def background_api():
@@ -3358,9 +3090,7 @@ def _chess_stage():
 
     grants = AVATAR.gate_grants(rel)
 
-    return AVATAR.speaking_stage(
-        AVATAR.stage_for_affinity(rel.get("affinity", 0), grants),
-        grants.get("friends", False))
+    return AVATAR.stage_for_affinity(rel.get("affinity", 0), grants)
 
 
 def _chess_bump(delta):

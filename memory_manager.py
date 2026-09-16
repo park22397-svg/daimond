@@ -505,14 +505,15 @@ def load_relationship():
 
 
 def save_relationship(affinity, stage_key, devotion_raw=None, lover=None,
-                      wants_child=None, strokes=None, climax=None,
-                      pregnant=None, friends=None):
+                      **_gone):
     """관계 상태를 저장한다.
 
-    lover 는 고백을 주고받았는지다. 그 전에는 호감이 광기 앞에서 멈춘다.
-    devotion_raw 는 친밀도 상한을 넘어 흘러넘친 점수다.
-    상한(330)에 닿은 뒤로도 쌓이는 마음을 여기에 모은다.
-    적지 않고 부르면 이미 쌓인 값을 그대로 둔다.
+    lover 는 고백을 주고받았는지다. 사이는 둘뿐이라(친구·연인)
+    이 한 칸이 곧 어느 쪽인지를 정한다.
+
+    devotion_raw 와 아이·절정 값들은 2026-09-16 에 없앴다. 옛 기억
+    파일에는 아직 그 칸이 남아 있을 수 있어 **읽기만 하고 쓰지 않는다**.
+    부르는 쪽이 옛 인자를 넘겨도 터지지 않게 `**_gone` 으로 받아 버린다.
     """
 
     data = load_memory_data()
@@ -521,54 +522,18 @@ def save_relationship(affinity, stage_key, devotion_raw=None, lover=None,
     if not isinstance(before, dict):
         before = {}
 
-    if devotion_raw is None:
-        devotion_raw = before.get("devotion_raw", 0)
-
-    # 연인이 되었는가.
-    #
-    # 광기로 넘어가려면 그 전에 고백을 주고받아야 한다.
-    # 적지 않고 부르면 이미 정해진 값을 그대로 둔다.
+    # 연인이 되었는가. 적지 않고 부르면 이미 정해진 값을 그대로 둔다.
     if lover is None:
         lover = before.get("lover", False)
 
-    # 말을 놓았는가.
-    #
-    # 호감이 오르면 저절로 반말이 되던 것을 고쳤다. 누군가 말 놓자고
-    # 하고 상대가 받아야 놓는다. 적지 않고 부르면 이미 정해진 값을 둔다.
-    if friends is None:
-        friends = before.get("friends", False)
-
-    # 다이아가 먼저 말 놓자고 물어봤는가. 두 번 묻지 않게.
-    asked_friend = before.get("asked_friend", False)
-
-    # 아이에 관한 것 넷.
-    #
-    #   wants_child : 아이를 갖겠다고 말했는가
-    #   strokes     : 절정까지 얼마나 왔는가. 절정마다 0으로 돌아간다
-    #   climax      : 절정을 몇 번 겪었는가
-    #   pregnant    : 아이가 섰는가
-    #
-    # 적지 않고 부르면 이미 쌓인 값을 그대로 둔다.
-    if wants_child is None:
-        wants_child = before.get("wants_child", False)
-    if strokes is None:
-        strokes = before.get("strokes", 0)
-    if climax is None:
-        climax = before.get("climax", 0)
-    if pregnant is None:
-        pregnant = before.get("pregnant", False)
+    # 다이아가 먼저 사귀자고 물어봤는가. 두 번 조르지 않게.
+    asked_lover = before.get("asked_lover", False)
 
     data["relationship"] = {
         "affinity": int(affinity),
         "stage": str(stage_key),
-        "devotion_raw": int(devotion_raw),
         "lover": bool(lover),
-        "friends": bool(friends),
-        "asked_friend": bool(asked_friend),
-        "wants_child": bool(wants_child),
-        "strokes": int(strokes),
-        "climax": int(climax),
-        "pregnant": bool(pregnant),
+        "asked_lover": bool(asked_lover),
     }
 
     save_memory_data(data)

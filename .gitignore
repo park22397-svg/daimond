@@ -66,3 +66,11 @@ build.json
 
 # 만들어 둔 목소리. 다시 만들 수 있는 것이라 안 올린다.
 _voice_cache/
+
+# 옷장에 구운 옷도 아바타에서 떼어 낸 것이다.
+#
+# `static/*.vrm` 은 한 칸 아래인 wardrobe/ 를 못 덮는다(* 는 / 를 안 넘는다).
+# 안 적어 두면 교복.vrm 이 그대로 공개 저장소로 올라간다 — 원본에
+# Redistribution_Prohibited 가 박힌 물건에서 뽑은 것이라 그러면 안 된다.
+# 옷장 목록(wardrobe.json)은 모델이 아니라 표라서 올린다.
+static/wardrobe/*.vrm

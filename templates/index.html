@@ -117,6 +117,77 @@
             font-family: inherit;
         }
 
+        /* 옷장.
+           오른쪽 아래. 이름표(who-badge, bottom 20)를 덮지 않게 그 위에 둔다.
+           목록은 위로 펼친다 — 아래로 펼치면 화면 밖으로 나간다. */
+        #wear-bar {
+            position: absolute;
+            right: 14px;
+            bottom: 64px;
+            z-index: 13;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+            user-select: none;
+        }
+
+        #wear-open {
+            background: rgba(20, 22, 42, 0.72);
+            border: 1px solid #3a3f68;
+            color: #dfe1f0;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        #wear-menu {
+            display: none;
+            flex-direction: column;
+            gap: 4px;
+            background: rgba(20, 22, 42, 0.92);
+            border: 1px solid #3a3f68;
+            border-radius: 10px;
+            padding: 6px;
+            max-height: 40vh;
+            overflow-y: auto;
+        }
+
+        #wear-menu.on {
+            display: flex;
+        }
+
+        #wear-menu button {
+            background: transparent;
+            border: 1px solid transparent;
+            color: #dfe1f0;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-family: inherit;
+            cursor: pointer;
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        #wear-menu button:hover {
+            background: rgba(90, 96, 150, 0.35);
+        }
+
+        #wear-menu button.on {
+            border-color: #6f76b8;
+            color: #fff;
+        }
+
+        #wear-menu .cap {
+            color: #8f93b8;
+            font-size: 0.72rem;
+            padding: 2px 12px 4px;
+            text-align: right;
+        }
+
         /* 눈 — 사진과 카메라 */
         #eye-bar {
             position: absolute;
@@ -1435,6 +1506,12 @@
         <!-- 우클릭하면 뜨는 도구 고르기 -->
         <div id="tool-menu"></div>
 
+        <!-- 옷장 -->
+        <div id="wear-bar">
+            <div id="wear-menu"></div>
+            <button id="wear-open">👗 옷장</button>
+        </div>
+
         <!-- 지금 어떤 사이이고 어떤 기분인지 -->
         <div id="state-panel">
 
@@ -2157,30 +2234,9 @@
         // 자각(프롬프트의 [아이])은 이것과 별개로 그대로 있다.
         // ------------------------------------------------------------
 
-        let pregnant = false;
-        let bellyNow = 0;            // 지금 부른 정도 0~1
-        let bellyWant = 0;
-        let bellyOverride = null;    // 시험 창이 밀고 있는 값
-
         // 손댄 정점 배열들. 원본을 떠 두고 그 위에 얹는다.
         const bellyMeshes = [];      // {attr, base, sphere}
 
-        function pregCfg() {
-            return (ENTITY && ENTITY.pregnancy) || null;
-        }
-
-        function setPregnant(on, instant) {
-            if (pregnant === !!on) return;
-            pregnant = !!on;
-            bellyWant = pregnant ? 1 : 0;
-            if (instant) bellyNow = bellyWant;
-            console.log('[diamondAI] ' + (pregnant ? '아이가 섰다' : '되돌림'));
-        }
-
-        // 어떤 정점 배열을 밀지 찾아 둔다.
-        //
-        // 프리미티브가 배열을 함께 쓰므로 같은 것을 두 번 담지 않는다.
-        // 두 번 담으면 두 배로 밀린다.
         function collectBelly(root) {
             if (!root) return;
 
@@ -2195,10 +2251,13 @@
 
                 if (bellyMeshes.some(m => m.attr === a)) return;
 
-                // 배 높이에 정점이 있는 것만. 얼굴이나 머리카락은 뺀다.
-                const p = pregCfg() || {};
-                const cy = p.center_y || 1.02;
-                const ry = p.radius_y || 0.17;
+                // 몸통 높이에 정점이 있는 것만. 얼굴이나 머리카락은 뺀다.
+                //
+                // 예전에는 임신 설정에서 이 범위를 가져왔다. 임신을
+                // 없애면서(2026-09-16) 여기 숫자로 박았다. 지금 이
+                // 정점들을 쓰는 것은 가슴골 하나뿐이다.
+                const cy = 1.10;
+                const ry = 0.35;
 
                 let has = false;
                 for (let i = 1; i < a.array.length; i += 3) {
@@ -2288,75 +2347,6 @@
         }
 
 
-        function applyBelly(k) {
-            const p = bellyOverride || pregCfg();
-            if (!p || !bellyMeshes.length) return;
-
-            const cy = p.center_y || 1.09;
-            const ry = p.radius_y || 0.09;
-            const edge = (p.edge === undefined) ? 0.5 : p.edge;
-            const fade = p.fade_y || 0.08;
-
-            const fw = (p.forward || 0.055) * k;
-            const sd = (p.side || 0.022) * k;
-            const bk = (p.back || 0.008) * k;
-
-            const outer = ry + fade;
-
-            for (let m = 0; m < bellyMeshes.length; m++) {
-                const arr = bellyMeshes[m].attr.array;
-                const base = bellyMeshes[m].base;
-
-                for (let i = 0; i < base.length; i += 3) {
-                    const x = base[i], y = base[i + 1], z = base[i + 2];
-
-                    const d = Math.abs(y - cy);
-
-                    if (d >= outer) {
-                        arr[i] = x; arr[i + 1] = y; arr[i + 2] = z;
-                        continue;
-                    }
-
-                    // 곡선을 두 단으로 준다.
-                    //
-                    // 한 단으로 0 까지 떨어뜨리면 옆에서 봤을 때 배가
-                    // 뾰족하다. 배 끝에서도 가운데의 edge 배(기본 0.5)는
-                    // 나와 있고, 거기서 fade 만큼 더 가서 0 이 된다.
-                    let w;
-                    if (d <= ry) {
-                        // 가운데 1 -> 배 끝 edge
-                        const c = Math.cos((d / ry) * Math.PI * 0.5);
-                        w = edge + (1 - edge) * c * c;
-                    } else {
-                        // 배 끝 edge -> 0
-                        const c = Math.cos(((d - ry) / fade) * Math.PI * 0.5);
-                        w = edge * c * c;
-                    }
-
-                    // 앞쪽이 많이 나오고 뒤는 조금만.
-                    // 앞뒤를 같이 밀면 통이 굵어질 뿐 배가 아니다.
-                    const front = z < 0;
-
-                    arr[i] = x + (x >= 0 ? sd : -sd) * w;
-                    arr[i + 1] = y;
-                    arr[i + 2] = z + (front ? -fw * w : bk * w);
-                }
-
-                bellyMeshes[m].attr.needsUpdate = true;
-            }
-
-            faceBellyNormals();
-        }
-
-
-        // 밀어 놓은 모양대로 법선을 다시 잡는다.
-        //
-        // 이게 없으면 배는 실제로 나왔는데 빛이 옛 모양대로 맞아서
-        // 앞에서 보면 평평해 보인다. 모양이 아니라 명암이 없는 것이다.
-        //
-        // 프리미티브 여섯이 정점 배열을 함께 쓰므로, 한 조각씩
-        // computeVertexNormals() 를 부르면 서로 지운다.
-        // 0 으로 지우는 것은 한 번만 하고, 삼각형은 모두에서 모은다.
         function faceBellyNormals() {
             for (let m = 0; m < bellyMeshes.length; m++) {
                 const rec = bellyMeshes[m];
@@ -2408,31 +2398,6 @@
             }
         }
 
-        function updateBelly(dt) {
-            if (!bellyOverride && bellyNow === bellyWant && bellyNow === 0) {
-                return;
-            }
-
-            if (bellyNow !== bellyWant) {
-                const p = pregCfg();
-                const ms = (p && p.grow_ms) || 2600;
-                const step = (dt * 1000) / Math.max(200, ms);
-                bellyNow += Math.sign(bellyWant - bellyNow)
-                    * Math.min(step, Math.abs(bellyWant - bellyNow));
-
-                // 다 자란 뒤에는 테두리를 한 번만 다시 잡는다.
-                // 매 프레임 다시 잡으면 정점 수만큼 헛돈다.
-                if (bellyNow === bellyWant) {
-                    bellyMeshes.forEach(m => {
-                        try { m.geo.computeBoundingSphere(); } catch (e) {}
-                    });
-                }
-            }
-
-            applyBelly(bellyNow);
-        }
-
-        // ------------------------------------------------------------
         // 3인칭
         //
         // 카메라만 몸에서 떨어져 나간다. 몸은 그대로 있고 방향키로
@@ -2759,9 +2724,7 @@
                     // 골을 먼저 판다. 이게 새 원본이 되고 배가 그 위에 얹힌다.
                     digCleavage();
 
-                    if (pregnant) applyBelly(1);
-
-                    // 밀어 놓은 모양대로 빛이 맞아야 보인다
+                    // 판 모양대로 빛이 맞아야 보인다
                     faceBellyNormals();
 
                     // 굴곡이 보이게 명암을 손본다
@@ -2778,6 +2741,7 @@
                     buildAffinityMarks();
                     buildMoodBars();
                     buildRps();
+                    loadWardrobe();
                     setMood(currentExpression);
                     refreshRelationship();
                 });
@@ -3701,7 +3665,7 @@
         let affinityShown = null;
 
         // 상한(330)을 넘어 쌓인 마음. 100점이 모여야 1이 된다.
-        const myDevotion = { level: 0, raw: 0, label: null };
+        let myWarmth = null;        // '살가움' 처럼 오늘의 온도
 
         // 지금 얼마나 상해 있는가.
         //
@@ -3792,9 +3756,8 @@
             // 눈금이 꽉 찬 뒤로도 쌓이는 마음이 있다.
             // 눈금은 그대로 두고 이름표 옆에 조용히 적는다.
             if (label) {
-                let t = myDevotion.level > 0
-                    ? label + ' · 순종 ' + myDevotion.level
-                      + (myDevotion.label ? ' (' + myDevotion.label + ')' : '')
+                let t = myWarmth
+                    ? label + ' · ' + myWarmth
                     : label;
 
                 // 연인이면 그렇게 적는다
@@ -3936,29 +3899,15 @@
                         myLover.ceiling = d.ceiling;
                     }
 
-                    // 창을 다시 열어도 배는 그대로다.
-                    // 이때는 부풀어 오르는 시늉 없이 곧바로 그 모습이다 —
-                    // 열 때마다 다시 배는 것처럼 보이면 안 된다.
-                    if (typeof d.pregnant === 'boolean') {
-                        setPregnant(d.pregnant, true);
-                    }
-
                     if (typeof d.mood === 'number') {
                         myMood.level = d.mood;
                         myMood.label = d.mood_label || null;
                         myMood.expression = d.mood_expression || null;
                     }
 
-                    if (typeof d.devotion === 'number') {
-                        const grew = d.devotion > myDevotion.level;
-                        myDevotion.level = d.devotion;
-                        myDevotion.raw = d.devotion_raw || 0;
-                        myDevotion.label = d.devotion_label || null;
-                        if (grew) {
-                            console.log('[diamondAI] 순종 ' + d.devotion
-                                + ' · ' + (d.devotion_label || ''));
-                        }
-                    }
+                    // 같은 친구라도 오늘은 어떤 온도인가
+                    myWarmth = d.warmth || null;
+
                     buildAffinityMarks();
                     setAffinity(d.affinity, d.label);
                     buildToolMenu();
@@ -3999,6 +3948,58 @@
                 rpsHands.appendChild(b);
             });
         }
+
+        // ------------------------------------------------------------
+        // 옷장 단추
+        // ------------------------------------------------------------
+
+        const wearOpen = document.getElementById('wear-open');
+        const wearMenu = document.getElementById('wear-menu');
+
+        function buildWearMenu() {
+            wearMenu.innerHTML = '';
+
+            if (!wardrobe.length) {
+                const cap = document.createElement('div');
+                cap.className = 'cap';
+                cap.textContent = '옷장이 비어 있다';
+                wearMenu.appendChild(cap);
+                wearOpen.style.display = 'none';
+                return;
+            }
+
+            wearOpen.style.display = '';
+
+            const nude = document.createElement('button');
+            nude.textContent = '벗기';
+            nude.className = wornKey ? '' : 'on';
+            nude.onclick = () => { takeOffOutfit(); closeWearMenu(); };
+            wearMenu.appendChild(nude);
+
+            wardrobe.forEach(it => {
+                const b = document.createElement('button');
+                b.textContent = it.label || it.key;
+                b.className = (wornKey === it.key) ? 'on' : '';
+                b.onclick = () => { wearOutfit(it.key); closeWearMenu(); };
+                wearMenu.appendChild(b);
+            });
+        }
+
+        function closeWearMenu() {
+            wearMenu.classList.remove('on');
+        }
+
+        wearOpen.addEventListener('click', (e) => {
+            e.stopPropagation();
+            buildWearMenu();
+            wearMenu.classList.toggle('on');
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!wearMenu.classList.contains('on')) return;
+            if (wearMenu.contains(e.target) || e.target === wearOpen) return;
+            closeWearMenu();
+        });
 
         function setRpsEnabled(on) {
             rpsHands.querySelectorAll('button')
@@ -4338,6 +4339,206 @@
             bodyVRM.scene.position.copy(currentVRM.scene.position).add(bodyLift);
         }
 
+
+        // ============================================================
+        // 옷장
+        //
+        // 옷은 통짜 아바타가 아니라 **옷만 든 작은 VRM** 이다.
+        // (_extract_garment.py 가 VRoid 에서 내보낸 VRM 에서 떼어 굽는다.
+        //  교복 한 벌이 1.4MB — 통짜로 두면 16MB 다)
+        //
+        // 입히는 법은 세 가지가 맞물린다.
+        //   1. 뼈를 이름으로 맞물린다. 옷 VRM 은 제 뼈대를 통째로 갖고 있고,
+        //      매 프레임 몸의 뼈에서 자리를 베껴 온다. 그래서 어떤 동작을
+        //      하든 옷이 따라온다.
+        //   2. 옷이 데려온 흔들림 본(치마 40개)은 옷 VRM 이 스스로 돌린다.
+        //   3. 옷에 가린 몸 삼각형을 감춘다. VRoid 가 하는 일을 흉내 내는
+        //      것으로, 안 하면 옷 속으로 살이 비친다.
+        // ============================================================
+
+        let wearVRM = null;         // 지금 입은 옷
+        let wearPairs = [];         // [몸의 뼈, 옷의 뼈] 짝
+        let wornKey = null;         // 지금 입은 옷 이름
+        let wardrobe = [];          // 옷장 목록
+        let bodyFullIndex = null;   // 감추기 전의 몸 삼각형 (벗을 때 되돌린다)
+        let bodyMaskMesh = null;
+
+        async function loadWardrobe() {
+            try {
+                const res = await fetch('/api/wardrobe');
+                const d = await res.json();
+                wardrobe = d.items || [];
+                console.log('[diamondAI] 옷장 ' + wardrobe.length + '벌');
+            } catch (e) {
+                wardrobe = [];
+                console.warn('[diamondAI] 옷장을 못 불러왔다:', e);
+            }
+            buildWearMenu();
+        }
+
+        function wearItem(key) {
+            return wardrobe.find(x => x.key === key) || null;
+        }
+
+        function wearOutfit(key) {
+            const item = wearItem(key);
+            if (!item) return Promise.resolve(null);
+            if (wornKey === key) return Promise.resolve(wearVRM);
+
+            takeOffOutfit();
+
+            return new Promise(resolve => {
+                new THREE.GLTFLoader().load(
+                    (ENTITY.model.wardrobe || '/static/wardrobe/') + item.file,
+                    (gltf) => {
+                        THREE.VRM.from(gltf).then(vrm => {
+                            wearVRM = vrm;
+                            wornKey = key;
+                            vrm.scene.rotation.y = Math.PI;
+                            scene.add(vrm.scene);
+
+                            bindWearBones();
+                            hideCoveredBody(item);
+
+                            // 굴곡이 보이게 명암을 맞춘다(몸과 같은 손질)
+                            tuneShading(vrm.scene);
+
+                            // 옷이 늘었으니 다시 나눈다.
+                            // 이래야 벗기기·잡아당기기가 이 옷에도 걸린다.
+                            splitParts();
+
+                            syncWear();
+                            buildWearMenu();
+                            console.log('[diamondAI] 옷 입음: ' + key);
+                            resolve(vrm);
+                        });
+                    },
+                    undefined,
+                    (e) => {
+                        console.warn('[diamondAI] 옷을 못 불러왔다:', e);
+                        resolve(null);
+                    }
+                );
+            });
+        }
+
+        function takeOffOutfit() {
+            if (!wearVRM) return;
+
+            scene.remove(wearVRM.scene);
+            wearVRM.scene.traverse(o => {
+                if (o.isMesh || o.isSkinnedMesh) {
+                    if (o.geometry) o.geometry.dispose();
+                    const ms = Array.isArray(o.material) ? o.material : [o.material];
+                    ms.forEach(m => m && m.dispose && m.dispose());
+                }
+            });
+
+            wearVRM = null;
+            wearPairs = [];
+            wornKey = null;
+
+            showCoveredBody();
+            splitParts();
+            buildWearMenu();
+        }
+
+        function bindWearBones() {
+            wearPairs = [];
+            if (!wearVRM || !currentVRM) return;
+
+            const src = new Map();
+            currentVRM.scene.traverse(o => {
+                if (o.isBone || o.type === 'Bone') src.set(o.name, o);
+            });
+
+            let extra = 0;
+            wearVRM.scene.traverse(o => {
+                if (!(o.isBone || o.type === 'Bone')) return;
+                const a = src.get(o.name);
+                if (a) wearPairs.push([a, o]);
+                else extra++;
+            });
+
+            // 맞물린 본과, 옷이 데려온 제 본(치마 흔들림 등)
+            console.log('[diamondAI] 옷 본 맞물림 ' + wearPairs.length
+                + '개 · 옷만의 본 ' + extra + '개');
+        }
+
+        function syncWear() {
+            if (!wearVRM || !currentVRM) return;
+
+            // 옷이 몸을 따라 걸어간다
+            wearVRM.scene.position.copy(currentVRM.scene.position);
+            wearVRM.scene.quaternion.copy(currentVRM.scene.quaternion);
+
+            // 자리를 통째로 베낀다.
+            //
+            // 회전만 베끼면 안 된다. 동작 중에는 뼈의 위치도 움직이고
+            // (걷기·점프), 그때 옷만 제자리에 남는다.
+            for (let i = 0; i < wearPairs.length; i++) {
+                const a = wearPairs[i][0], b = wearPairs[i][1];
+                b.position.copy(a.position);
+                b.quaternion.copy(a.quaternion);
+                b.scale.copy(a.scale);
+            }
+        }
+
+        function hideCoveredBody(item) {
+            const hide = item && item.hide;
+            if (!hide || !hide.mask || !currentVRM) return;
+
+            // 어느 메시가 몸인가.
+            //
+            // ★ 재질 이름으로 찾으면 안 된다. three-vrm 이 MToon 으로 바꿔
+            //   끼우면서 material.name 이 빈 문자열이 된다(파일 안에는 멀쩡히
+            //   들어 있어서 더 헷갈린다). 삼각형 수로 찾는다.
+            let target = null;
+            currentVRM.scene.traverse(o => {
+                if (!(o.isMesh || o.isSkinnedMesh) || !o.geometry.index) return;
+                if (o.userData && o.userData.bone) return;
+                const nm = (Array.isArray(o.material) ? o.material[0] : o.material);
+                const label = (nm && nm.name) || '';
+                if (label.indexOf(hide.material) >= 0) target = o;
+                else if (!target && o.geometry.index.count / 3 === hide.triangles) target = o;
+            });
+
+            if (!target) {
+                console.warn('[diamondAI] 가릴 몸 메시를 못 찾았다 (삼각형 '
+                    + hide.triangles + '개짜리)');
+                return;
+            }
+
+            const bin = atob(hide.mask);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+            const idx = target.geometry.index.array;
+            const tris = idx.length / 3;
+            const keep = [];
+            let hid = 0;
+
+            for (let t = 0; t < tris; t++) {
+                if ((bytes[t >> 3] >> (7 - (t & 7))) & 1) { hid++; continue; }
+                keep.push(idx[t * 3], idx[t * 3 + 1], idx[t * 3 + 2]);
+            }
+
+            bodyFullIndex = idx;
+            bodyMaskMesh = target;
+            target.geometry.setIndex(
+                new THREE.BufferAttribute(new idx.constructor(keep), 1));
+
+            console.log('[diamondAI] 옷에 가린 몸 삼각형 ' + hid + '개를 감췄다');
+        }
+
+        function showCoveredBody() {
+            if (!bodyMaskMesh || !bodyFullIndex) return;
+            bodyMaskMesh.geometry.setIndex(
+                new THREE.BufferAttribute(bodyFullIndex, 1));
+            bodyMaskMesh = null;
+            bodyFullIndex = null;
+        }
+
         function loadBody(url) {
             return new Promise(resolve => {
                 new THREE.GLTFLoader().load(url, (gltf) => {
@@ -4351,7 +4552,9 @@
 
                         // 표현용에서 쓰는 것은 몸뿐이다.
                         // 얼굴은 절정 표정을 지을 때만 꺼내 쓰고,
-                        // 신발은 avatar 쪽 것을 쓰므로 여기서는 감춘다.
+                        // 신발·머리카락은 avatar 쪽 것을 쓰므로 여기서는 감춘다.
+                        // (새 캐릭터.vrm 은 맨몸인데도 머리카락이 들어 있다.
+                        //  같은 머리가 두 겹이면 서로 비쳐 깜빡인다.)
                         specialFaces = [];
                         vrm.scene.traverse(o => {
                             if (!o.isMesh && !o.isSkinnedMesh) return;
@@ -4359,7 +4562,7 @@
                             if (isFaceMesh(o)) {
                                 o.visible = false;
                                 specialFaces.push(o);
-                            } else if (part === 'shoes') {
+                            } else if (part === 'shoes' || part === 'hair') {
                                 o.visible = false;
                             }
                         });
@@ -4573,11 +4776,15 @@
 
         function splitParts() {
             Object.keys(PARTS).forEach(k => PARTS[k] = []);
-            cloths.length = 0;      // 다시 나눌 때 겹쳐 쌓이지 않게
 
             if (!currentVRM) return;
 
-            currentVRM.scene.traverse(o => {
+            // 옷장에서 입은 옷도 같이 센다.
+            // 안 그러면 갈아입은 옷은 벗기지도 잡아당기지도 못한다.
+            const roots = [currentVRM.scene];
+            if (wearVRM) roots.push(wearVRM.scene);
+
+            roots.forEach(root => root.traverse(o => {
                 if (!o.isMesh && !o.isSkinnedMesh) return;
                 if (o.userData && o.userData.bone) return;   // 판정구는 뺀다
 
@@ -4593,10 +4800,8 @@
 
                 o.userData.part = part;
 
-                if (o.isSkinnedMesh) detachCloth(o);
-
                 PARTS[part].push(o);
-            });
+            }));
 
             // 신발에서 양말을 갈라낸다. 따로 벗을 수 있어야 한다.
             applySplits(PARTS);
@@ -4606,7 +4811,11 @@
 
             console.log('[diamondAI] 몸/옷 나눔: ' + summary);
 
-            if (!PARTS.skirt.length && !PARTS.top.length) {
+            // 옷을 안 입고 있으면 옷 메시가 없는 것이 맞다.
+            //
+            // 바탕 아바타가 맨몸이 된 뒤로는(2026-09-16) 벗은 상태가
+            // 정상이다. 그때도 경고를 띄우면 진짜 고장과 구별이 안 된다.
+            if (!PARTS.skirt.length && !PARTS.top.length && (wornKey || !wardrobe.length)) {
                 console.warn('[diamondAI] 옷 메시를 못 찾았다. 재질 이름을 확인하라:');
                 currentVRM.scene.traverse(o => {
                     if (!o.isMesh && !o.isSkinnedMesh) return;
@@ -4615,160 +4824,6 @@
                     console.warn('   물체 "' + o.name + '"  재질 "'
                         + (m && m.name) + '"');
                 });
-            }
-        }
-
-
-        // ------------------------------------------------------------
-        // 옷 잡아당기기
-        //
-        // 옷 메시만 살짝 옮겼다가 되돌린다. 스키닝 메시라도 물체 자체를
-        // 옮기면 그대로 딸려 오므로, 뼈를 건드리지 않고 옷만 끌 수 있다.
-        // ------------------------------------------------------------
-
-        const tug = { list: [], offset: new THREE.Vector3(), amount: 0 };
-
-        // 화면에서 끈 방향을 월드 방향으로 옮긴다.
-        //
-        // 화면의 가로·세로는 카메라의 오른쪽·위쪽이다. 그 둘을 섞으면
-        // 보는 각도가 어떻든 '마우스로 끈 쪽'이 나온다.
-        // 화면 y 는 아래가 커지므로 위쪽 축에는 부호를 뒤집어 곱한다.
-        const _camRight = new THREE.Vector3();
-        const _camUp = new THREE.Vector3();
-        const _camBack = new THREE.Vector3();
-
-        function screenPullToWorld(px, py, out) {
-            camera.matrixWorld.extractBasis(_camRight, _camUp, _camBack);
-
-            out.set(0, 0, 0)
-                .addScaledVector(_camRight, px)
-                .addScaledVector(_camUp, -py);
-
-            if (out.lengthSq() < 1e-9) {
-                // 방향이 없으면(단추로 부른 경우) 아래로 늘어뜨린다
-                out.copy(_camUp).multiplyScalar(-1);
-            }
-
-            return out.normalize();
-        }
-
-        function tugCloth(zone, distance, pull) {
-            const meshes = PARTS[zone];
-
-            if (!meshes || !meshes.length) {
-                console.warn('[diamondAI] 끌 옷이 없다: ' + zone);
-                return;
-            }
-
-            tug.list = meshes;
-            tug.amount = 1;
-
-            // 마우스로 끈 방향으로 끌린다.
-            // 어디서도 방향이 오지 않으면 아래로 늘어뜨린다.
-            const dir = new THREE.Vector3();
-            screenPullToWorld(
-                (pull && pull.x) || 0,
-                (pull && pull.y) || 0,
-                dir
-            );
-
-            // 몸에서 살짝 떼어 놓아야 끌린 것이 보인다. 보는 쪽으로 띄운다.
-            camera.matrixWorld.extractBasis(_camRight, _camUp, _camBack);
-
-            tug.offset
-                .copy(dir).multiplyScalar(distance)
-                .addScaledVector(_camBack, distance * 0.3);
-
-            console.log('[diamondAI] 옷 끌림: ' + zone
-                + ' ' + (distance * 100).toFixed(1) + 'cm, 방향 ('
-                + tug.offset.x.toFixed(3) + ', '
-                + tug.offset.y.toFixed(3) + ', '
-                + tug.offset.z.toFixed(3) + '), 메시 '
-                + meshes.length + '개');
-        }
-
-
-        // ------------------------------------------------------------
-        // 옷을 실제로 옮기는 자리
-        //
-        // 스키닝 메시는 position 을 건드려도 꿈쩍도 안 한다. 셰이더가
-        //   matrixWorld * bindMatrixInverse * (본이 만든 월드 좌표)
-        // 를 그리는데, bindMode 가 'attached' 면 three.js 가 매 프레임
-        // bindMatrixInverse = matrixWorld 의 역행렬로 다시 잡아서
-        // 앞의 matrixWorld 와 그대로 상쇄되기 때문이다.
-        //
-        // 'detached' 로 바꾸면 상쇄가 풀리지만, 이번에는 three.js 가
-        // 매 프레임 bindMatrixInverse = bindMatrix 의 역행렬로 되돌린다
-        // (r137 SkinnedMesh.updateMatrixWorld). 그래서 이 값을 손으로
-        // 고쳐 놓아도 첫 프레임에 지워진다. 옷과 머리카락만 앞뒤가
-        // 뒤집혔던 것이 이것 때문이다 — 아바타를 돌려 세운 180도가
-        // 상쇄되지 않고 한 번 더 곱해졌다.
-        //
-        // 그래서 bindMatrixInverse 대신 matrixWorld 쪽을 잡는다.
-        //   matrixWorld = T(옮길 거리) * bindMatrix
-        // 로 두면 셰이더에서 bindMatrix 가 제 역행렬과 만나 지워지고
-        // T 만 남는다. 안 옮겼으면 T 가 단위행렬이라 원래 자리 그대로다.
-        //
-        // matrixWorld 는 three.js 가 parent.matrixWorld * matrix 로
-        // 만드니 우리가 쥘 것은 matrix 다. matrixAutoUpdate 를 끈다.
-        //
-        // 옮기는 거리는 월드 기준이다. 마우스로 끈 방향을 그대로 쓸 수 있다.
-        // ------------------------------------------------------------
-
-        const cloths = [];
-        const _tugMat = new THREE.Matrix4();
-        const _parentInv = new THREE.Matrix4();
-
-        function detachCloth(m) {
-            m.bindMode = 'detached';
-            m.matrixAutoUpdate = false;
-            m.userData.tug = new THREE.Vector3();
-            cloths.push(m);
-            placeCloth(m);
-        }
-
-        function placeCloth(m) {
-            if (!m.parent) return;
-
-            // 아바타가 걸어 다니면 부모의 matrixWorld 가 바뀐다.
-            // 그때마다 다시 잡지 않으면 옷만 딴 데로 간다.
-            m.parent.updateWorldMatrix(true, false);
-
-            const d = m.userData.tug;
-            _tugMat.makeTranslation(d.x, d.y, d.z).multiply(m.bindMatrix);
-            _parentInv.copy(m.parent.matrixWorld).invert();
-
-            m.matrix.multiplyMatrices(_parentInv, _tugMat);
-            m.matrixWorldNeedsUpdate = true;
-        }
-
-        function placeAllCloths() {
-            for (let i = 0; i < cloths.length; i++) placeCloth(cloths[i]);
-        }
-
-        function updateTug(dt) {
-            if (!tug.list.length) return;
-
-            // 되돌아가는 속도. 확 당겼다가 천천히 놓는 느낌으로.
-            tug.amount -= dt * 1.8;
-            if (tug.amount < 0) tug.amount = 0;
-
-            const e = tug.amount * tug.amount;      // 끝에서 부드럽게
-
-            tug.list.forEach(m => {
-                if (!m.userData.tug) return;
-                m.userData.tug.set(
-                    tug.offset.x * e,
-                    tug.offset.y * e,
-                    tug.offset.z * e
-                );
-            });
-
-            if (tug.amount === 0) {
-                tug.list.forEach(m => {
-                    if (m.userData.tug) m.userData.tug.set(0, 0, 0);
-                });
-                tug.list = [];
             }
         }
 
@@ -5165,15 +5220,6 @@
             // 그대로 두면 이 반응의 얼굴을 눈감기가 도로 덮는다.
             if (data.kind === 'kiss') kissWaiting = false;
 
-            // 아이가 섰으면 배가 불러 온다
-            if (typeof data.pregnant === 'boolean') {
-                setPregnant(data.pregnant, false);
-            }
-
-            if (data.pregnant_now) {
-                showHint('아이가 섰다', 5200);
-            }
-
             // 만졌으면 그쪽을 본다
             faceUser();
 
@@ -5195,14 +5241,6 @@
                 // 입을 닫았다. 만져도 말하지 않는다.
                 showSilence(data.expression || 'angry');
                 return;
-            }
-
-            // 여러 번 잡아당겼으면 옷이 실제로 끌려온다
-            if (data.tug) {
-                tugCloth(data.tug.zone, data.tug.distance, {
-                    x: touchState.pullX || 0,
-                    y: touchState.pullY || 0,
-                });
             }
 
             if (data.reply) {
@@ -5467,13 +5505,6 @@
                 resetCamera();
             }
 
-            // 옷 끌림을 손으로 시험한다. 끄는 횟수를 채우지 않고도 볼 수 있다.
-            if (e.key === 't' || e.key === 'T') {
-                tugCloth('skirt', 0.08);
-            }
-            if (e.key === 'y' || e.key === 'Y') {
-                tugCloth('top', 0.08);
-            }
         });
 
 
@@ -6551,7 +6582,6 @@
                 // 개체가 내려준 동작을 재생하고 위치를 갱신한다
                 updateMotion(deltaTime);
                 updateRoam(deltaTime);
-                updateTug(deltaTime);
                 updateBubblePos(deltaTime);
                 updateZzzPos();
 
@@ -6753,15 +6783,17 @@
             }
 
 
-            // 배는 자세보다 앞이다. 정점을 미는 것이라 뼈와 싸우지 않는다.
-            updateBelly(deltaTime);
-
             // 옷이 걸어간 만큼 몸도 따라간다
             followBody();
 
-            // 옷 자리는 그리기 직전에 잡는다.
-            // 자세와 위치가 다 정해진 뒤라야 부모의 matrixWorld 가 최신이다.
-            placeAllCloths();
+            // 옷장에서 입은 옷을 몸에 맞물린다.
+            //
+            // 자세가 다 정해진 뒤라야 한다. 앞에 두면 한 프레임 늦은 자리를
+            // 베껴서 빠르게 움직일 때 옷만 뒤에 끌린다.
+            if (wearVRM) {
+                syncWear();
+                wearVRM.update(deltaTime);   // 치마 흔들림 본
+            }
 
 
             renderer.render(
@@ -7059,13 +7091,8 @@
                 affinityShown = null;      // 변화량 표시가 튀지 않게
 
                 // 사이만 바꾸고 나머지를 그대로 두면 이름표가 거짓말을 한다.
-                //
-                // 순종은 얀데레에서만 쌓이는 것인데, 기억을 치운 뒤에도
-                // 화면이 옛 값을 들고 있어서 '서먹함 · 순종 50' 처럼 떴다.
-                // 서버는 이미 0 으로 비웠는데 화면만 몰랐다.
-                myDevotion.level = 0;
-                myDevotion.raw = 0;
-                myDevotion.label = null;
+                // 서버는 이미 비웠는데 화면만 옛 값을 들고 있는 일이 생긴다.
+                myWarmth = null;
                 myMood.level = 0;
                 myMood.label = null;
                 myLover.yes = false;
@@ -7163,36 +7190,17 @@
         // 어디서 끊기는지 알려면 화면 안의 상태를 봐야 한다.
         function handleClothCommand(text) {
 
-            if (text !== '/옷' && text !== '/옷당기기') return false;
+            if (text !== '/옷' && text !== '/옷장') return false;
 
             const counts = Object.keys(PARTS)
                 .map(k => k + ' ' + PARTS[k].length).join(', ');
 
-            const m0 = (PARTS.skirt && PARTS.skirt[0]) || null;
-
             appendMessage('ai',
-                '옷 메시: ' + counts + ' | '
-                + '옮길 수 있는 옷: ' + cloths.length + '개 | '
-                + (m0
-                    ? '치마 첫 메시 — 떼어냄 '
-                      + (m0.bindMode === 'detached' ? 'O' : 'X')
-                      + ' · 스스로갱신 ' + (m0.matrixAutoUpdate ? '켜짐(문제)' : '꺼짐')
-                      + ' · 자리기억 ' + (m0.userData.tug ? 'O' : 'X')
-                    : '치마 메시를 못 찾았다'));
-
-            if (m0) {
-                tugCloth('skirt', 0.09, { x: 0, y: 120 });
-                setTimeout(() => {
-                    const w = new THREE.Vector3()
-                        .setFromMatrixPosition(m0.matrixWorld);
-                    appendMessage('ai',
-                        '당긴 방향 (' + tug.offset.x.toFixed(3) + ', '
-                        + tug.offset.y.toFixed(3) + ', '
-                        + tug.offset.z.toFixed(3) + ') | '
-                        + '메시 월드 자리 (' + w.x.toFixed(3) + ', '
-                        + w.y.toFixed(3) + ', ' + w.z.toFixed(3) + ')');
-                }, 200);
-            }
+                '옷장 ' + wardrobe.length + '벌'
+                + (wardrobe.length ? ' (' + wardrobe.map(w => w.key).join(', ') + ')' : '')
+                + ' | 지금 입은 것: ' + (wornKey || '없음')
+                + ' | 맞물린 본: ' + wearPairs.length + '개'
+                + ' | 메시: ' + counts);
 
             return true;
         }
@@ -7243,17 +7251,12 @@
 
                 appendMessage('ai',
                     '호감도 ' + d.before + ' → ' + d.affinity
-                    + ' (' + d.stage_label + ')'
-                    + (d.devotion_cleared
-                        ? ' · 쌓였던 순종 ' + d.devotion_cleared + '점도 비웠습니다'
-                        : ''));
+                    + ' (' + d.stage_label + ')');
 
                 // 사이가 통째로 바뀌었다. 눈금과 잠긴 도구를 다시 맞춘다.
                 myAffinity = d.affinity;
                 myStageKey = d.stage;
-                myDevotion.level = 0;
-                myDevotion.raw = 0;
-                myDevotion.label = null;
+                myWarmth = null;
                 affinityShown = null;      // 변화량 표시가 튀지 않게
 
                 buildAffinityMarks();
@@ -7280,83 +7283,7 @@
         function handleChildCommand(text) {
             const t = text.replace(/\s+/g, '');
 
-            if (t === '/아이' || t === '/임신상태') {
-                appendMessage('user', text);
-                childState(null);
-                return true;
-            }
-
-            if (t === '/임신') {
-                appendMessage('user', text);
-                childState({ wants_child: true, pregnant: true, strokes: 0 },
-                            '아이가 섰습니다.');
-                return true;
-            }
-
-            if (t === '/임신취소' || t === '/임신해제') {
-                appendMessage('user', text);
-                childState({ pregnant: false, climax: 0, strokes: 0 },
-                            '되돌렸습니다.');
-                return true;
-            }
-
-            if (t === '/약속') {
-                appendMessage('user', text);
-                childState({ wants_child: true }, '아이를 갖기로 한 것으로 둡니다.');
-                return true;
-            }
-
-            let m = t.match(/^\/절정(-?\d+)$/);
-            if (m) {
-                appendMessage('user', text);
-                childState({ climax: parseInt(m[1], 10), strokes: 0 });
-                return true;
-            }
-
-            m = t.match(/^\/순종(-?\d+)$/);
-            if (m) {
-                appendMessage('user', text);
-                childState({ devotion: parseInt(m[1], 10) });
-                return true;
-            }
-
             return false;
-        }
-
-
-        async function childState(patch, note) {
-            try {
-                const res = await fetch('/api/child', {
-                    method: patch ? 'POST' : 'GET',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: patch ? JSON.stringify(patch) : undefined,
-                });
-                const d = await res.json();
-
-                if (!d.ok) {
-                    appendMessage('ai', d.error || '맞추지 못했습니다.');
-                    return;
-                }
-
-                setPregnant(d.pregnant, false);
-
-                myDevotion.level = d.devotion;
-                myDevotion.raw = d.devotion_raw;
-
-                appendMessage('ai',
-                    (note ? note + '\n\n' : '')
-                    + '단계     ' + (d.stage || '?')
-                    + '  (아이 이야기는 ' + d.need_stage + ' 부터)\n'
-                    + '순종     ' + d.devotion + ' / ' + d.need_devotion + '\n'
-                    + '약속     ' + (d.wants_child ? '했다' : '아직')  + '\n'
-                    + '절정     ' + d.climax + ' / ' + d.need_climax + '\n'
-                    + '쌓인 것  ' + d.strokes + ' / ' + d.need_strokes + '\n'
-                    + '아이     ' + (d.pregnant ? '섰다' : '아직'));
-
-            } catch (e) {
-                console.warn('[diamondAI] 아이 상태 실패:', e);
-                appendMessage('ai', '맞추지 못했습니다.');
-            }
         }
 
 
@@ -8706,13 +8633,7 @@
 /호감 초기화   사이를 처음으로 (기억은 그대로 둔다)
 /호감 <숫자>   그 값으로 맞추기 (예: /호감 300)
 
-[아이 — 시험용]
-/아이          지금 어디까지 왔는지 보기
-/순종 <숫자>   순종 맞추기 (아이 이야기는 50 부터)
-/약속          아이를 갖기로 한 것으로 두기
-/절정 <숫자>   절정 횟수 맞추기 (5 면 다음 절정에 아이가 선다)
-/임신          바로 아이가 서게
-/임신 취소     되돌리기
+/옷장      지금 옷장에 무엇이 걸려 있는지
 
 /기억삭제  (되돌릴 수 없음)
 
