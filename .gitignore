@@ -74,3 +74,8 @@ _voice_cache/
 # Redistribution_Prohibited 가 박힌 물건에서 뽑은 것이라 그러면 안 된다.
 # 옷장 목록(wardrobe.json)은 모델이 아니라 표라서 올린다.
 static/wardrobe/*.vrm
+
+# 옷장에 넣으려고 떨군 원본 VRM 도 아바타에서 나온 것이다.
+# 구운 옷과 같은 이유로 저장소에 안 올린다.
+static/wardrobe/_새로넣기/*.vrm
+static/wardrobe/_넣은것/
