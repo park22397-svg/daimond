@@ -287,7 +287,9 @@ def load_memory_data():
 
 
 def load_wearing():
-    """지금 입고 있는 옷 이름. 없으면 None.
+    """지금 입고 있는 것들. {칸: 이름} 으로 돌려준다.
+
+    칸이 다르면 같이 입는다 — 교복을 입은 채로 안경을 쓴다.
 
     '벗고 있음' 과 '아직 아무것도 안 정했음' 은 다르다.
     벗겼으면 빈 문자열이 적히고, 처음 온 사람은 칸 자체가 없다 —
@@ -295,18 +297,32 @@ def load_wearing():
     """
     w = load_memory_data().get("wearing", {})
 
-    if not isinstance(w, dict) or "key" not in w:
-        return None
+    if not isinstance(w, dict):
+        return {}
 
-    return w.get("key") or ""
+    # 칸을 나누기 전에는 {"key": "교복"} 한 칸이었다. 옛 기억을 읽어 준다.
+    if "key" in w:
+        return {"outfit": w.get("key") or ""}
+
+    return {k: (v or "") for k, v in w.items() if isinstance(v, str)}
 
 
-def save_wearing(key):
-    """입은 옷을 적는다. 벗었으면 빈 문자열."""
+def save_wearing(slot, key):
+    """그 칸에 무엇을 입었는지 적는다. 벗었으면 빈 문자열."""
     data = load_memory_data()
-    data["wearing"] = {"key": str(key or "")}
+
+    w = data.get("wearing")
+
+    if not isinstance(w, dict) or "key" in w:
+        w = load_wearing()          # 옛 형태면 새 형태로 옮겨 담는다
+
+    w = dict(w)
+    w[str(slot)] = str(key or "")
+
+    data["wearing"] = w
     save_memory_data(data)
-    return data["wearing"]
+
+    return w
 
 
 def load_session():

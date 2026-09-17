@@ -2710,25 +2710,11 @@ def wardrobe_api():
         else:
             print(f"[옷장] 파일이 없어 건너뜀: {name}")
 
-    # 지금 무엇을 입고 있는가.
-    #
-    # 세 가지가 다르다.
-    #   적힌 옷 이름 → 그 옷을 입힌다
-    #   빈 문자열    → 일부러 벗은 것이다. 그대로 둔다
-    #   칸 자체가 없음 → 처음 온 사람이다. 기본 옷을 입힌다
-    #
-    # 마지막이 중요하다. 처음 열었을 때 벗고 있으면 안 된다.
-    worn = memory_manager.load_wearing()
-    keys = [it.get("key") for it in live]
+    # 지금 무엇을 입고 있는가. 칸마다 따로다.
+    worn = _worn_map(live)
 
-    if worn is None:
-        worn = keys[0] if keys else ""
-    elif worn and worn not in keys:
-        # 옷장에서 사라진 옷을 입고 있었다. 있는 것으로 갈아입힌다.
-        print(f"[옷장] 입고 있던 '{worn}' 이 없어졌다")
-        worn = keys[0] if keys else ""
-
-    return jsonify({"ok": True, "items": live, "worn": worn})
+    return jsonify({"ok": True, "items": live, "worn": worn,
+                    "slots": SLOT_ORDER})
 
 
 @app.route("/api/wardrobe", methods=["POST"])
@@ -2741,11 +2727,21 @@ def wardrobe_wear_api():
 
     data = request.get_json(silent=True) or {}
     key = str(data.get("key") or "")
+    slot = str(data.get("slot") or "")
 
-    memory_manager.save_wearing(key)
-    print(f"[옷장] {'벗었습니다' if not key else key + ' 을(를) 입었습니다'}")
+    # 이름만 보내면 그 물건이 걸리는 칸을 찾아 준다.
+    if key and not slot:
+        slot = _slot_of_key(key) or "outfit"
 
-    return jsonify({"ok": True, "worn": key})
+    if not slot:
+        slot = "outfit"
+
+    memory_manager.save_wearing(slot, key)
+
+    print("[옷장] %s 칸: %s" % (slot, key or "벗음"))
+
+    return jsonify({"ok": True, "slot": slot, "worn": key,
+                    "all": memory_manager.load_wearing()})
 
 
 @app.route("/api/background")
@@ -2954,25 +2950,77 @@ def _wardrobe_items():
             and os.path.exists(os.path.join(base, it["file"]))]
 
 
+# 칸 차례. 화면과 프롬프트에 이 순서로 적는다.
+SLOT_ORDER = ("outfit", "glasses", "hair")
+
+SLOT_LABEL = {"outfit": "옷", "glasses": "안경", "hair": "머리"}
+
+
+def _slot_of(item):
+    """그 물건이 걸리는 칸. 옛 wardrobe.json 에는 없을 수 있다."""
+    return item.get("slot") or "outfit"
+
+
+def _slot_of_key(key):
+    for it in _wardrobe_items():
+        if it.get("key") == key:
+            return _slot_of(it)
+    return None
+
+
 def _wardrobe_now():
-    """프롬프트에 적을 옷 목록."""
-    return [{"key": it.get("key"), "label": it.get("label") or it.get("key")}
-            for it in _wardrobe_items()]
+    """프롬프트에 적을 목록. 칸 이름을 같이 준다."""
+    out = []
+
+    for it in _wardrobe_items():
+        slot = _slot_of(it)
+        out.append({
+            "key": it.get("key"),
+            "label": it.get("label") or it.get("key"),
+            "slot": slot,
+            "slot_label": it.get("slot_label") or SLOT_LABEL.get(slot, slot),
+        })
+
+    return out
+
+
+def _worn_map(items=None):
+    """칸마다 무엇을 입고 있는가. {칸: 이름}
+
+    처음 온 사람(적힌 것이 없음)에게는 **옷 칸만** 기본을 입힌다.
+    안경과 머리는 안 씌운다 — 처음부터 안경을 씌우면 그건 기본 얼굴이
+    아니라 설정이다.
+
+    옷장에서 사라진 것을 입고 있었으면 벗긴다.
+    """
+    items = _wardrobe_items() if items is None else items
+    saved = memory_manager.load_wearing()
+
+    by_slot = {}
+    for it in items:
+        by_slot.setdefault(_slot_of(it), []).append(it.get("key"))
+
+    out = {}
+
+    for slot in SLOT_ORDER:
+        keys = by_slot.get(slot) or []
+        got = saved.get(slot)
+
+        if got is None:
+            # 아직 아무것도 안 정했다
+            out[slot] = keys[0] if (slot == "outfit" and keys) else ""
+        elif got and got not in keys:
+            print(f"[옷장] {slot} 칸의 '{got}' 이(가) 없어졌다")
+            out[slot] = keys[0] if (slot == "outfit" and keys) else ""
+        else:
+            out[slot] = got
+
+    return out
 
 
 def _worn_now():
-    """지금 입고 있는 옷 이름. 벗었으면 None.
-
-    처음 온 사람(칸이 없음)은 기본 옷을 입는 것으로 본다 —
-    /api/wardrobe 가 그렇게 입히기 때문에 여기서도 같아야 한다.
-    안 맞추면 프롬프트만 '벗고 있다' 고 알게 된다.
-    """
-    worn = memory_manager.load_wearing()
-    keys = [it.get("key") for it in _wardrobe_items()]
-
-    if worn is None:
-        return keys[0] if keys else None
-
+    """프롬프트에 적을 '지금 입은 것' 목록. 아무것도 없으면 None."""
+    worn = [v for k, v in _worn_map().items() if v]
     return worn or None
 
 
@@ -2981,11 +3029,85 @@ def _apply_wear(result):
 
     장소(_apply_place)와 같은 얼개다. 표시는 큐에서 걷어내고,
     화면이 받아 쓸 수 있게 result["wear"] 에 담아 준다.
+
+    **칸은 물건이 정한다.** '안경' 이라 적으면 안경 칸에 걸리므로
+    입고 있던 옷은 그대로다. 같은 칸의 것을 적으면 갈아입는다.
     """
     cues = result.get("cues")
 
     if not isinstance(cues, list) or not cues:
         return result
+
+    wants = []
+    keep = []
+
+    for c in cues:
+        if isinstance(c, dict) and c.get("type") == "wear":
+            wants.append(c.get("key"))
+            continue
+        keep.append(c)
+
+    if not wants:
+        return result
+
+    result["cues"] = keep
+
+    items = _wardrobe_items()
+    keys = [it.get("key") for it in items]
+    worn = _worn_map(items)
+    changed = {}
+
+    for want in wants:
+        want = str(want or "").strip()
+
+        # "안경 벗기" 처럼 무엇을 벗을지 적었을 수 있다.
+        #
+        # ★ 무엇을 벗는지부터 본다. '벗기' 가 들어 있다는 것만 보고
+        #   옷 칸으로 정하면 **"안경 벗기" 가 옷을 벗긴다.** 실제로 그랬다.
+        off_slot = None
+
+        for k in keys:
+            if k and want.startswith(k) and AVATAR.wear_is_off(want[len(k):]):
+                off_slot = _slot_of_key(k)
+                break
+
+        if off_slot is None:
+            for slot, label in SLOT_LABEL.items():
+                if want.startswith(label) and AVATAR.wear_is_off(want[len(label):]):
+                    off_slot = slot
+                    break
+
+        # 그냥 '벗기' 면 옷을 벗는 것이다
+        if off_slot is None and AVATAR.wear_is_off(want):
+            off_slot = "outfit"
+
+        if off_slot:
+            if not worn.get(off_slot):
+                continue
+            memory_manager.save_wearing(off_slot, "")
+            print(f"[옷]: {off_slot} 칸 — {worn[off_slot]} 벗음")
+            worn[off_slot] = ""
+            changed[off_slot] = ""
+            continue
+
+        if want not in keys:
+            print(f"[옷]: '{want}' 은(는) 옷장에 없습니다 — 그냥 둡니다.")
+            continue
+
+        slot = _slot_of_key(want) or "outfit"
+
+        if worn.get(slot) == want:
+            continue
+
+        memory_manager.save_wearing(slot, want)
+        print(f"[옷]: {slot} 칸 — {worn.get(slot) or '없음'} -> {want}")
+        worn[slot] = want
+        changed[slot] = want
+
+    if changed:
+        result["wear"] = {"worn": worn, "changed": changed}
+
+    return result
 
     want = None
     keep = []

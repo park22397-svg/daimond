@@ -44,8 +44,48 @@ CHUNK_BIN = 0x004E4942
 COMP = {5120: 'i1', 5121: 'u1', 5122: 'i2', 5123: 'u2', 5125: 'u4', 5126: 'f4'}
 NCOMP = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4, 'MAT4': 16}
 
-# 옷으로 볼 재질. VRoid 는 옷 재질 이름에 _CLOTH 를 붙인다.
-CLOTH_MARK = '_CLOTH'
+# 떼어 낼 수 있는 것들.
+#
+# VRoid 는 재질 이름에 무엇인지 적어 둔다 — 옷은 _CLOTH, 안경은 Glasses,
+# 머리카락은 _HAIR. 그 이름으로 골라낸다.
+# ★ 머리카락(_HAIR)은 기본에서 뺀다.
+#   바탕 아바타가 이미 머리를 갖고 있어서, 넣으면 옷에 머리가 딸려 들어온다
+#   (교복이 1.4MB 에서 3.5MB 로 불고 카라 밀기가 머리 정점 4천 개를 건드렸다).
+#   머리를 갈아 끼우려면 `--hair` 로 부른다.
+ITEM_MARKS = ('_CLOTH', 'Glasses', 'GLASS')
+HAIR_MARKS = ('_HAIR',)
+
+# 어느 칸에 걸리는가.
+#
+# 칸이 다르면 같이 입을 수 있다 — 교복을 입은 채로 안경을 쓴다.
+# 같은 칸이면 갈아입는 것이다.
+SLOT_OF_ZONE = {
+    'glasses': 'glasses',
+    'accessory': 'glasses',
+    'hair': 'hair',
+    'top': 'outfit',
+    'skirt': 'outfit',
+    'shoes': 'outfit',
+    'socks': 'outfit',
+}
+
+SLOT_LABEL = {'outfit': '옷', 'glasses': '안경', 'hair': '머리'}
+
+
+def slot_of(zones):
+    """떼어 낸 부위들로 어느 칸인지 정한다.
+
+    옷이 하나라도 섞여 있으면 옷 칸이다 — 교복에 리본이 딸려 오는 것처럼
+    장신구가 옷의 일부인 경우가 있기 때문이다.
+    """
+    slots = {SLOT_OF_ZONE.get(z.get('zone')) for z in zones}
+    slots.discard(None)
+
+    for want in ('outfit', 'hair', 'glasses'):
+        if want in slots:
+            return want
+
+    return 'outfit'
 
 
 # ------------------------------------------------------------------
@@ -203,7 +243,7 @@ def write_glb(path, gltf, blob):
 # ------------------------------------------------------------------
 
 def extract(outfit_path, base_path, name, outdir, verbose=True,
-            collar_from=1.325):
+            collar_from=1.325, marks=ITEM_MARKS, only=None):
     go, bo = load_glb(outfit_path)
     say = print if verbose else (lambda *a, **k: None)
 
@@ -229,11 +269,21 @@ def extract(outfit_path, base_path, name, outdir, verbose=True,
                     return np.median(q[np.unique(i)], axis=0)
                 base_pos = base_pos + (mid(go, bo, fo[0][1]) - mid(gb, bb, fb[0][1]))
 
-    cloth = find_prims(go, lambda nm: CLOTH_MARK in nm)
-    if not cloth:
-        raise SystemExit('옷 재질(_CLOTH)이 없다: ' + outfit_path)
+    cloth = find_prims(go, lambda nm: any(k in nm for k in marks))
 
-    say('옷 프리미티브 %d개' % len(cloth))
+    # 한 파일에 옷과 안경이 같이 들어 있을 수 있다(VRoid 는 아바타 통째로
+    # 내보내니까). 칸을 따로 두려면 **두 번 떼어 낸다** —
+    # 한 번은 옷만, 한 번은 안경만.
+    if only:
+        cloth = [(mi, p, nm) for mi, p, nm in cloth
+                 if SLOT_OF_ZONE.get(zone_of(nm)) == only]
+        say('%s 칸만 떼어 낸다' % SLOT_LABEL.get(only, only))
+
+    if not cloth:
+        raise SystemExit('떼어 낼 재질이 없다(%s): %s'
+                         % ('/'.join(marks), outfit_path))
+
+    say('떼어 낼 프리미티브 %d개' % len(cloth))
     for _mi, p, nm in cloth:
         tri = len(acc_read(go, bo, p['indices'])) // 3
         say('   %-40s %6d 삼각형  구역=%s' % (nm.split('(')[0].strip(), tri, zone_of(nm)))
@@ -263,7 +313,16 @@ def extract(outfit_path, base_path, name, outdir, verbose=True,
         #
         # 굽기 **전에** 해야 한다. 자리를 옮긴 다음 그 값을 담아야
         # 파일에 남는다.
-        if collar_from is not None and base_pos is not None:
+        # 밀어내기는 **옷에만** 건다.
+        #
+        # 머리카락과 안경은 살을 파고드는 물건이 아니다. 안경은 얼굴에
+        # 닿아 있는 것이 정상인데, 밀어내면 얼굴에서 떠 버린다
+        # (실제로 안경 정점 72개가 최대 18.6mm 밀렸다).
+        CLOTH_ZONES = {'top', 'skirt', 'shoes', 'socks'}
+        zones_here = {zone_of(nm) for _p, nm in plist}
+
+        if (collar_from is not None and base_pos is not None
+                and (zones_here & CLOTH_ZONES)):
             src_pos = acc_read(go, bo, attrs['POSITION']).astype(np.float64)
             src_pos = np.array(src_pos, dtype=np.float64)   # 쓰기 가능하게
             push_out_of_body(src_pos, keep, base_pos, base_idx,
@@ -456,16 +515,24 @@ def extract(outfit_path, base_path, name, outdir, verbose=True,
     size = write_glb(out, gltf, b.blob)
     say('\n구웠다: %s  (%.2f MB)' % (out, size / 1024 / 1024))
 
+    slot = slot_of(zones)
+
     entry = {
         'key': name,
         'label': name,
+        'slot': slot,
+        'slot_label': SLOT_LABEL.get(slot, slot),
         'file': os.path.basename(out),
         'parts': zones,
         'source': os.path.basename(outfit_path),
     }
 
+    say('칸: %s (%s)' % (SLOT_LABEL.get(slot, slot), slot))
+
     # --- 몸 가리기 -------------------------------------------------------
-    if base_path:
+    #
+    # 옷 칸에서만 뜻이 있다. 안경을 쓴다고 살이 가려지지는 않는다.
+    if base_path and slot == 'outfit':
         entry['hide'] = body_mask(base_path, outfit_path, say)
 
     return entry
@@ -691,6 +758,11 @@ def main():
                     help='맨몸 VRM (몸 가리기 계산에 쓴다)')
     ap.add_argument('--name', help='옷 이름. 안 주면 파일 이름에서 딴다')
     ap.add_argument('--out', default=os.path.join(HERE, 'static', 'wardrobe'))
+    ap.add_argument('--hair', action='store_true',
+                    help='옷 대신 머리카락을 떼어낸다')
+    ap.add_argument('--only', choices=('outfit', 'glasses', 'hair'),
+                    help='이 칸의 것만 떼어낸다. 한 파일에 옷과 안경이 '
+                         '같이 있을 때 두 번 불러 나눈다')
     ap.add_argument('--collar-from', type=float, default=1.325,
                     help='이 높이(m) 위의 옷 정점을 살 밖으로 민다. '
                          '끄려면 음수를 준다')
@@ -699,7 +771,9 @@ def main():
     name = a.name or os.path.splitext(os.path.basename(a.outfit))[0]
     entry = extract(a.outfit, a.base if os.path.exists(a.base) else None,
                     name, a.out,
-                    collar_from=(None if a.collar_from < 0 else a.collar_from))
+                    collar_from=(None if a.collar_from < 0 else a.collar_from),
+                    marks=(HAIR_MARKS if a.hair else ITEM_MARKS),
+                    only=a.only)
 
     # wardrobe.json 에 적는다. 같은 이름이면 갈아 끼운다.
     book = os.path.join(a.out, 'wardrobe.json')

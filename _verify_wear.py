@@ -55,7 +55,12 @@ if not ITEMS:
           "(_extract_garment.py 로 옷을 구우면 여기서 검사합니다)")
     sys.exit(0)
 
-FIRST = ITEMS[0]["key"]
+OUTFITS = [it for it in ITEMS if main._slot_of(it) == "outfit"]
+FIRST = (OUTFITS or ITEMS)[0]["key"]
+FIRST_SLOT = main._slot_of((OUTFITS or ITEMS)[0])
+
+# 칸이 다른 것이 있으면 '같이 걸치기' 도 본다
+OTHER = next((it for it in ITEMS if main._slot_of(it) != FIRST_SLOT), None)
 
 
 print("1. 말에서 표시 꺼내기")
@@ -82,8 +87,11 @@ with app.test_client() as c:
 
     first = c.get("/api/wardrobe").get_json()
     ok(first.get("ok"), "옷장을 준다")
-    ok(first.get("worn") == FIRST,
-       "처음 온 사람은 기본 옷을 입고 있다", first.get("worn"))
+    worn = first.get("worn") or {}
+    ok(worn.get("outfit") == FIRST,
+       "처음 온 사람은 기본 옷을 입고 있다", worn)
+    ok(not worn.get("glasses"),
+       "안경은 안 씌운다 — 처음 얼굴이 기본이다", worn)
 
     # 이미 입은 옷을 또 입으라면 아무 일도 없어야 한다
     out = main._apply_wear({"cues": list(cues)})
@@ -94,44 +102,64 @@ with app.test_client() as c:
     # 벗기
     _b, off = extract_cues("(옷: 벗기)")
     out = main._apply_wear({"cues": off})
-    ok((out.get("wear") or {}).get("key") == "", "말로 벗는다")
-    ok(c.get("/api/wardrobe").get_json().get("worn") == "",
+    ok((out.get("wear") or {}).get("changed", {}).get("outfit") == "",
+       "말로 벗는다", out.get("wear"))
+    ok((c.get("/api/wardrobe").get_json().get("worn") or {}).get("outfit") == "",
        "벗은 채로 적힌다")
 
     # 일부러 벗은 사람은 창을 열어도 벗은 채다
-    ok(memory_manager.load_wearing() == "",
+    ok(memory_manager.load_wearing().get("outfit") == "",
        "'벗음' 과 '아직 안 정함' 을 가른다")
 
     # 다시 입기
     _b, on = extract_cues(f"(옷: {FIRST})")
     out = main._apply_wear({"cues": on})
-    ok((out.get("wear") or {}).get("key") == FIRST, "말로 다시 입는다")
-    ok(c.get("/api/wardrobe").get_json().get("worn") == FIRST, "입은 채로 적힌다")
+    ok((out.get("wear") or {}).get("changed", {}).get("outfit") == FIRST,
+       "말로 다시 입는다")
+    ok((c.get("/api/wardrobe").get_json().get("worn") or {}).get("outfit") == FIRST,
+       "입은 채로 적힌다")
 
     # 없는 옷
     _b, bad = extract_cues("(옷: 있을리없는옷)")
     out = main._apply_wear({"cues": bad})
     ok(out.get("wear") is None, "없는 옷은 그냥 둔다")
-    ok(c.get("/api/wardrobe").get_json().get("worn") == FIRST,
+    ok((c.get("/api/wardrobe").get_json().get("worn") or {}).get("outfit") == FIRST,
        "없는 옷을 말해도 입은 것이 안 바뀐다")
 
+    # 칸이 다르면 같이 걸친다
+    if OTHER:
+        _b, two = extract_cues(f"(옷: {OTHER['key']})")
+        out = main._apply_wear({"cues": two})
+        now = c.get("/api/wardrobe").get_json().get("worn") or {}
+        ok(now.get("outfit") == FIRST,
+           f"{OTHER['key']} 를 걸쳐도 옷은 그대로다", now)
+        ok(now.get(main._slot_of(OTHER)) == OTHER["key"],
+           f"{OTHER['key']} 가 제 칸에 걸린다", now)
+
+        # 그 칸만 벗기
+        _b, o2 = extract_cues(f"(옷: {OTHER['key']} 벗기)")
+        main._apply_wear({"cues": o2})
+        now = c.get("/api/wardrobe").get_json().get("worn") or {}
+        ok(not now.get(main._slot_of(OTHER)), "그 칸만 벗는다", now)
+        ok(now.get("outfit") == FIRST, "옷은 그대로 남는다", now)
+
     # 단추로 갈아입는 길(POST)도 같은 자리에 적혀야 한다
-    c.post("/api/wardrobe", json={"key": ""})
-    ok(memory_manager.load_wearing() == "", "단추로 벗은 것도 적힌다")
+    c.post("/api/wardrobe", json={"slot": "outfit", "key": ""})
+    ok(memory_manager.load_wearing().get("outfit") == "", "단추로 벗은 것도 적힌다")
 
 
 print("\n3. 프롬프트")
 
 p = AVATAR.system_prompt(stage=AVATAR.stage("friend"),
                          wardrobe=main._wardrobe_now(),
-                         worn=FIRST)
+                         worn=[FIRST])
 
-ok("[입을 수 있는 옷]" in p, "옷장이 프롬프트에 실린다")
+ok("[네 옷장]" in p, "옷장이 프롬프트에 실린다")
 ok(FIRST in p, "옷 이름이 실린다")
 ok("(옷: 교복) 처럼" in p, "어떻게 적는지 알려 준다")
-ok("(지금 입은 것)" in p, "지금 입은 것을 표시한다")
+ok("(지금)" in p, "지금 걸친 것을 표시한다")
 
-note = AVATAR.wear_note(FIRST)
+note = AVATAR.wear_note([FIRST])
 ok(note and FIRST in note, "무엇을 입고 있는지 한 줄로 준다", note)
 
 # 옷장이 비면 블록이 아예 없어야 한다 (빈 목록을 적어 주면 헷갈린다)

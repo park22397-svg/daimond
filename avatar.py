@@ -2251,35 +2251,64 @@ class VirtualAvatar:
                    for w in self.wear_conf().get("off_words", []))
 
     def wear_note(self, worn):
-        """지금 무엇을 입고 있는지 한 줄로. 적을 것이 없으면 None."""
+        """지금 무엇을 걸치고 있는지 한 줄로. 없으면 None.
+
+        여럿일 수 있다 — 교복을 입고 안경을 썼을 수 있다.
+        """
         if not worn:
             return None
-        return f"지금 입고 있는 것은 '{worn}' 이다."
+
+        if isinstance(worn, str):
+            worn = [worn]
+
+        names = [w for w in worn if w]
+
+        if not names:
+            return None
+
+        return "지금 걸치고 있는 것은 " + ", ".join(
+            f"'{n}'" for n in names) + " 이다."
 
     def wardrobe_block(self, items, worn=None):
-        """입을 수 있는 옷을 프롬프트에 적는다. 없으면 None."""
+        """입을 수 있는 것을 프롬프트에 적는다. 없으면 None.
+
+        **칸을 나눠 적는다.** 옷·안경·머리는 칸이 달라 같이 걸칠 수 있다.
+        한 줄로 늘어놓으면 다이아가 안경을 쓰려고 옷을 벗는다.
+        """
         if not items or not self.wear_conf().get("enabled", True):
             return None
+
+        now = set(worn or [])
 
         lines = [
             "",
             "--------------------------------------------------",
-            "[입을 수 있는 옷]",
+            "[네 옷장]",
             "--------------------------------------------------",
             "",
-            "네 옷장이다. 갈아입을 수 있는 것은 이것뿐이다.",
+            "칸이 다르면 같이 걸친다. 같은 칸이면 갈아입는 것이다.",
             "",
         ]
 
-        for it in items:
-            name = it if isinstance(it, str) else (it.get("label") or it.get("key"))
-            lines.append(f"- {name}" + ("   (지금 입은 것)" if name == worn else ""))
+        by_slot = {}
 
-        # 장소와 같은 이유로 짧게 적는다.
+        for it in items:
+            if isinstance(it, str):
+                by_slot.setdefault("옷", []).append(it)
+                continue
+            label = it.get("slot_label") or "옷"
+            by_slot.setdefault(label, []).append(
+                it.get("label") or it.get("key"))
+
+        for label, names in by_slot.items():
+            lines.append(f"{label}:")
+            for n in names:
+                lines.append(f"  - {n}" + ("   (지금)" if n in now else ""))
+
         lines += [
             "",
             "정말로 갈아입을 때만 (옷: 교복) 처럼 적는다.",
-            "벗을 때는 (옷: 벗기) 라고 적는다.",
+            "벗을 때는 (옷: 벗기), 안경만 벗을 때는 (옷: 안경 벗기).",
             "글로만 쓰면 화면은 안 바뀐다 — 지난 이야기에는 안 적는다.",
             "옷 이야기를 매번 꺼내지는 마라. 갈아입자고 하거나,",
             "네가 정말 갈아입고 싶을 때만이다.",
@@ -3175,9 +3204,12 @@ DIA = VirtualAvatar(
         # 바뀌지만(표현용 몸이 10022 -> 10934 -> 10022 로 오갔다)
         # 재질 이름은 그대로다.
         # 순서대로 검사하니 좁은 것을 위에 둔다.
+        {"zone": "glasses", "match": "glasses"},  # 안경
+        {"zone": "top", "match": "tie"},          # Accessory_Tie — 윗옷과 함께 간다.
+                                                  # accessory 보다 먼저 봐야 한다
+        {"zone": "accessory", "match": "accessory"},
         {"zone": "hair", "match": "hair"},        # HairBack, Hair_00_HAIR
         {"zone": "top", "match": "tops"},
-        {"zone": "top", "match": "tie"},          # Accessory_Tie — 윗옷과 함께 간다
         {"zone": "skirt", "match": "onepiece"},
         {"zone": "skirt", "match": "skirt"},
         {"zone": "skirt", "match": "bottoms"},    # 교복 치마(N00_001_03_Bottoms)

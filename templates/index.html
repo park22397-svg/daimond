@@ -3970,19 +3970,39 @@
 
             wearOpen.style.display = '';
 
-            const nude = document.createElement('button');
-            nude.textContent = '벗기';
-            nude.className = wornKey ? '' : 'on';
-            nude.onclick = () => { takeOffOutfit(); closeWearMenu(); };
-            wearMenu.appendChild(nude);
-
+            // 칸마다 묶어 적는다. 칸이 다르면 같이 걸친다.
+            const bySlot = {};
             wardrobe.forEach(it => {
-                const b = document.createElement('button');
-                b.textContent = it.label || it.key;
-                b.className = (wornKey === it.key) ? 'on' : '';
-                b.onclick = () => { wearOutfit(it.key); closeWearMenu(); };
-                wearMenu.appendChild(b);
+                const k = slotOf(it);
+                (bySlot[k] = bySlot[k] || []).push(it);
             });
+
+            (window.__slotOrder || ['outfit', 'glasses', 'hair'])
+                .concat(Object.keys(bySlot))
+                .filter((v, i, a) => a.indexOf(v) === i)
+                .forEach(slot => {
+                    const list = bySlot[slot];
+                    if (!list || !list.length) return;
+
+                    const cap = document.createElement('div');
+                    cap.className = 'cap';
+                    cap.textContent = list[0].slot_label || slot;
+                    wearMenu.appendChild(cap);
+
+                    const off = document.createElement('button');
+                    off.textContent = '벗기';
+                    off.className = wornKeyOf(slot) ? '' : 'on';
+                    off.onclick = () => { takeOffSlot(slot); closeWearMenu(); };
+                    wearMenu.appendChild(off);
+
+                    list.forEach(it => {
+                        const b = document.createElement('button');
+                        b.textContent = it.label || it.key;
+                        b.className = (wornKeyOf(slot) === it.key) ? 'on' : '';
+                        b.onclick = () => { wearOutfit(it.key); closeWearMenu(); };
+                        wearMenu.appendChild(b);
+                    });
+                });
         }
 
         function closeWearMenu() {
@@ -4356,12 +4376,20 @@
         //      것으로, 안 하면 옷 속으로 살이 비친다.
         // ============================================================
 
-        let wearVRM = null;         // 지금 입은 옷
-        let wearPairs = [];         // [몸의 뼈, 옷의 뼈] 짝
-        let wornKey = null;         // 지금 입은 옷 이름
+        // 칸마다 하나씩 걸친다 — 옷 · 안경 · 머리.
+        // 칸이 다르면 같이 걸치므로 하나짜리 변수로는 안 된다.
+        const WEAR = {};            // 칸 -> {vrm, pairs, key, item}
         let wardrobe = [];          // 옷장 목록
         let bodyFullIndex = null;   // 감추기 전의 몸 삼각형 (벗을 때 되돌린다)
         let bodyMaskMesh = null;
+
+        function wornKeyOf(slot) {
+            return (WEAR[slot] && WEAR[slot].key) || null;
+        }
+
+        function anyWorn() {
+            return Object.keys(WEAR).filter(k => WEAR[k]);
+        }
 
         async function loadWardrobe() {
             let want = null;
@@ -4370,9 +4398,10 @@
                 const res = await fetch('/api/wardrobe');
                 const d = await res.json();
                 wardrobe = d.items || [];
-                want = d.worn || '';
-                console.log('[diamondAI] 옷장 ' + wardrobe.length + '벌'
-                    + (want ? ' · 입고 있던 옷 ' + want : ' · 벗은 채'));
+                want = d.worn || {};
+                window.__slotOrder = d.slots || null;
+                console.log('[diamondAI] 옷장 ' + wardrobe.length + '벌 · 걸친 것 '
+                    + (JSON.stringify(want) || '없음'));
             } catch (e) {
                 wardrobe = [];
                 console.warn('[diamondAI] 옷장을 못 불러왔다:', e);
@@ -4380,51 +4409,59 @@
 
             buildWearMenu();
 
-            // 입고 있던 옷을 도로 입는다.
+            // 걸치고 있던 것들을 도로 입는다.
             //
             // 서버가 '처음 온 사람' 에게는 기본 옷 이름을 준다.
             // 창을 열었는데 벗고 있으면 안 된다.
-            if (want) await wearOutfit(want, true);
+            for (const slot of Object.keys(want || {})) {
+                if (want[slot]) await wearOutfit(want[slot], true);
+            }
         }
 
         function wearItem(key) {
             return wardrobe.find(x => x.key === key) || null;
         }
 
-        function rememberWearing(key) {
-            // 무엇을 입었는지 적어 둔다. 실패해도 화면은 그대로 간다.
+        function rememberWearing(slot, key) {
+            // 무엇을 걸쳤는지 적어 둔다. 실패해도 화면은 그대로 간다.
             fetch('/api/wardrobe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key: key || '' }),
+                body: JSON.stringify({ slot: slot, key: key || '' }),
             }).catch(() => {});
+        }
+
+        function slotOf(item) {
+            return (item && item.slot) || 'outfit';
         }
 
         function wearOutfit(key, restoring) {
             const item = wearItem(key);
             if (!item) return Promise.resolve(null);
-            if (wornKey === key) return Promise.resolve(wearVRM);
 
-            takeOffOutfit(true);
+            const slot = slotOf(item);
+            if (wornKeyOf(slot) === key) return Promise.resolve(WEAR[slot].vrm);
+
+            // 같은 칸의 것만 벗는다. 안경을 쓰려고 옷을 벗지 않는다.
+            takeOffSlot(slot, true);
 
             return new Promise(resolve => {
                 new THREE.GLTFLoader().load(
                     (ENTITY.model.wardrobe || '/static/wardrobe/') + item.file,
                     (gltf) => {
                         THREE.VRM.from(gltf).then(vrm => {
-                            wearVRM = vrm;
-                            wornKey = key;
+                            WEAR[slot] = { vrm: vrm, pairs: [], key: key, item: item };
                             vrm.scene.rotation.y = Math.PI;
                             scene.add(vrm.scene);
 
-                            bindWearBones();
-                            hideCoveredBody(item);
+                            bindWearBones(slot);
+                            applyBodyMask();
 
                             // 굴곡이 보이게 명암을 맞춘다(몸과 같은 손질)
                             tuneShading(vrm.scene);
 
-                            // 옷이 늘었으니 다시 나눈다.
-                            // 이래야 벗기기·잡아당기기가 이 옷에도 걸린다.
+                            // 걸친 것이 늘었으니 다시 나눈다.
+                            // 이래야 벗기기가 이것에도 걸린다.
                             splitParts();
 
                             syncWear();
@@ -4432,15 +4469,15 @@
 
                             // 창을 열며 도로 입는 것은 적지 않는다.
                             // 방금 읽어 온 값을 그대로 되쓰는 꼴이다.
-                            if (!restoring) rememberWearing(key);
+                            if (!restoring) rememberWearing(slot, key);
 
-                            console.log('[diamondAI] 옷 입음: ' + key);
+                            console.log('[diamondAI] ' + slot + ' 칸에 ' + key);
                             resolve(vrm);
                         });
                     },
                     undefined,
                     (e) => {
-                        console.warn('[diamondAI] 옷을 못 불러왔다:', e);
+                        console.warn('[diamondAI] 못 불러왔다:', key, e);
                         resolve(null);
                     }
                 );
@@ -4448,25 +4485,30 @@
         }
 
         function applyWear(w) {
-            // 서버가 '무엇을 입었다' 고 알려 온 것을 화면에 옮긴다.
+            // 서버가 '무엇을 걸쳤다' 고 알려 온 것을 화면에 옮긴다.
             //
             // 이미 저장까지 끝난 뒤라 여기서 다시 적지 않는다
             // (restoring=true). 적으면 방금 받은 값을 되쓰는 꼴이다.
-            const key = w && w.key;
+            if (!w) return;
 
-            if (!key) {
-                takeOffOutfit();
+            const changed = w.changed || {};
+
+            Object.keys(changed).forEach(slot => {
+                const key = changed[slot];
+                if (key) wearOutfit(key, true);
+                else takeOffSlot(slot, false, true);
+            });
+        }
+
+        function takeOffSlot(slot, swapping, restoring) {
+            const cur = WEAR[slot];
+            if (!cur) {
+                if (!swapping && !restoring) rememberWearing(slot, '');
                 return;
             }
 
-            wearOutfit(key, true);
-        }
-
-        function takeOffOutfit(swapping) {
-            if (!wearVRM) return;
-
-            scene.remove(wearVRM.scene);
-            wearVRM.scene.traverse(o => {
+            scene.remove(cur.vrm.scene);
+            cur.vrm.scene.traverse(o => {
                 if (o.isMesh || o.isSkinnedMesh) {
                     if (o.geometry) o.geometry.dispose();
                     const ms = Array.isArray(o.material) ? o.material : [o.material];
@@ -4474,21 +4516,25 @@
                 }
             });
 
-            wearVRM = null;
-            wearPairs = [];
-            wornKey = null;
+            delete WEAR[slot];
 
-            showCoveredBody();
+            applyBodyMask();
             splitParts();
             buildWearMenu();
 
-            // 갈아입는 중이면 적지 않는다. 곧 새 옷 이름이 적힌다.
-            if (!swapping) rememberWearing('');
+            // 갈아입는 중이면 적지 않는다. 곧 새 이름이 적힌다.
+            if (!swapping && !restoring) rememberWearing(slot, '');
         }
 
-        function bindWearBones() {
-            wearPairs = [];
-            if (!wearVRM || !currentVRM) return;
+        function takeOffAll() {
+            Object.keys(WEAR).forEach(slot => takeOffSlot(slot));
+        }
+
+        function bindWearBones(slot) {
+            const cur = WEAR[slot];
+            if (!cur || !currentVRM) return;
+
+            cur.pairs = [];
 
             const src = new Map();
             currentVRM.scene.traverse(o => {
@@ -4496,90 +4542,124 @@
             });
 
             let extra = 0;
-            wearVRM.scene.traverse(o => {
+            cur.vrm.scene.traverse(o => {
                 if (!(o.isBone || o.type === 'Bone')) return;
                 const a = src.get(o.name);
-                if (a) wearPairs.push([a, o]);
+                if (a) cur.pairs.push([a, o]);
                 else extra++;
             });
 
-            // 맞물린 본과, 옷이 데려온 제 본(치마 흔들림 등)
-            console.log('[diamondAI] 옷 본 맞물림 ' + wearPairs.length
-                + '개 · 옷만의 본 ' + extra + '개');
+            console.log('[diamondAI] ' + slot + ' 본 맞물림 ' + cur.pairs.length
+                + '개 · 제 본 ' + extra + '개');
         }
 
         function syncWear() {
-            if (!wearVRM || !currentVRM) return;
+            if (!currentVRM) return;
 
-            // 옷이 몸을 따라 걸어간다
-            wearVRM.scene.position.copy(currentVRM.scene.position);
-            wearVRM.scene.quaternion.copy(currentVRM.scene.quaternion);
+            Object.keys(WEAR).forEach(slot => {
+                const cur = WEAR[slot];
+                if (!cur) return;
 
-            // 자리를 통째로 베낀다.
-            //
-            // 회전만 베끼면 안 된다. 동작 중에는 뼈의 위치도 움직이고
-            // (걷기·점프), 그때 옷만 제자리에 남는다.
-            for (let i = 0; i < wearPairs.length; i++) {
-                const a = wearPairs[i][0], b = wearPairs[i][1];
-                b.position.copy(a.position);
-                b.quaternion.copy(a.quaternion);
-                b.scale.copy(a.scale);
-            }
+                // 걸친 것이 몸을 따라 걸어간다
+                cur.vrm.scene.position.copy(currentVRM.scene.position);
+                cur.vrm.scene.quaternion.copy(currentVRM.scene.quaternion);
+
+                // 자리를 통째로 베낀다.
+                //
+                // 회전만 베끼면 안 된다. 동작 중에는 뼈의 위치도 움직이고
+                // (걷기·점프), 그때 옷만 제자리에 남는다.
+                const pairs = cur.pairs;
+                for (let i = 0; i < pairs.length; i++) {
+                    const a = pairs[i][0], b = pairs[i][1];
+                    b.position.copy(a.position);
+                    b.quaternion.copy(a.quaternion);
+                    b.scale.copy(a.scale);
+                }
+            });
         }
 
-        function hideCoveredBody(item) {
-            const hide = item && item.hide;
-            if (!hide || !hide.mask || !currentVRM) return;
+        function updateWear(dt) {
+            Object.keys(WEAR).forEach(slot => {
+                const cur = WEAR[slot];
+                if (cur) cur.vrm.update(dt);   // 치마 흔들림 본
+            });
+        }
 
-            // 어느 메시가 몸인가.
+        function applyBodyMask() {
+            // 걸친 것들이 가리는 몸 삼각형을 **합쳐서** 감춘다.
             //
-            // ★ 재질 이름으로 찾으면 안 된다. three-vrm 이 MToon 으로 바꿔
-            //   끼우면서 material.name 이 빈 문자열이 된다(파일 안에는 멀쩡히
-            //   들어 있어서 더 헷갈린다). 삼각형 수로 찾는다.
-            let target = null;
-            currentVRM.scene.traverse(o => {
-                if (!(o.isMesh || o.isSkinnedMesh) || !o.geometry.index) return;
-                if (o.userData && o.userData.bone) return;
-                const nm = (Array.isArray(o.material) ? o.material[0] : o.material);
-                const label = (nm && nm.name) || '';
-                if (label.indexOf(hide.material) >= 0) target = o;
-                else if (!target && o.geometry.index.count / 3 === hide.triangles) target = o;
+            // 한 벌씩 따로 감추면 두 번째 것을 벗을 때 첫 번째가 감춘
+            // 것까지 되살아난다. 늘 원본에서 다시 계산한다.
+            if (!currentVRM) return;
+
+            const masks = [];
+
+            Object.keys(WEAR).forEach(slot => {
+                const it = WEAR[slot] && WEAR[slot].item;
+                if (it && it.hide && it.hide.mask) masks.push(it.hide);
             });
 
-            if (!target) {
-                console.warn('[diamondAI] 가릴 몸 메시를 못 찾았다 (삼각형 '
-                    + hide.triangles + '개짜리)');
+            // 가릴 몸 메시를 찾는다.
+            //
+            // ★ 재질 이름으로 찾으면 안 된다. three-vrm 이 MToon 으로 바꿔
+            //   끼우면서 material.name 이 빈 문자열이 된다(파일 안에는
+            //   멀쩡히 들어 있어서 더 헷갈린다). 삼각형 수로 찾는다.
+            const want = masks.length ? masks[0].triangles : null;
+
+            if (!bodyMaskMesh) {
+                currentVRM.scene.traverse(o => {
+                    if (!(o.isMesh || o.isSkinnedMesh) || !o.geometry.index) return;
+                    if (o.userData && o.userData.bone) return;
+                    const tri = o.geometry.index.count / 3;
+                    if (want !== null && tri === want) bodyMaskMesh = o;
+                });
+            }
+
+            if (!bodyMaskMesh) {
+                if (masks.length) {
+                    console.warn('[diamondAI] 가릴 몸 메시를 못 찾았다 (삼각형 '
+                        + want + '개짜리)');
+                }
                 return;
             }
 
-            const bin = atob(hide.mask);
-            const bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            if (!bodyFullIndex) {
+                bodyFullIndex = bodyMaskMesh.geometry.index.array;
+            }
 
-            const idx = target.geometry.index.array;
+            const idx = bodyFullIndex;
             const tris = idx.length / 3;
+
+            if (!masks.length) {
+                bodyMaskMesh.geometry.setIndex(
+                    new THREE.BufferAttribute(idx, 1));
+                return;
+            }
+
+            // 비트를 합친다
+            const bits = masks.map(h => {
+                const bin = atob(h.mask);
+                const by = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) by[i] = bin.charCodeAt(i);
+                return by;
+            });
+
             const keep = [];
             let hid = 0;
 
             for (let t = 0; t < tris; t++) {
-                if ((bytes[t >> 3] >> (7 - (t & 7))) & 1) { hid++; continue; }
+                let off = false;
+                for (let m = 0; m < bits.length; m++) {
+                    if ((bits[m][t >> 3] >> (7 - (t & 7))) & 1) { off = true; break; }
+                }
+                if (off) { hid++; continue; }
                 keep.push(idx[t * 3], idx[t * 3 + 1], idx[t * 3 + 2]);
             }
 
-            bodyFullIndex = idx;
-            bodyMaskMesh = target;
-            target.geometry.setIndex(
+            bodyMaskMesh.geometry.setIndex(
                 new THREE.BufferAttribute(new idx.constructor(keep), 1));
 
             console.log('[diamondAI] 옷에 가린 몸 삼각형 ' + hid + '개를 감췄다');
-        }
-
-        function showCoveredBody() {
-            if (!bodyMaskMesh || !bodyFullIndex) return;
-            bodyMaskMesh.geometry.setIndex(
-                new THREE.BufferAttribute(bodyFullIndex, 1));
-            bodyMaskMesh = null;
-            bodyFullIndex = null;
         }
 
         function loadBody(url) {
@@ -4659,7 +4739,8 @@
         // 재질 이름이 그 표식이다.
         // ============================================================
 
-        const PARTS = { body: [], top: [], skirt: [], shoes: [], socks: [], hair: [] };
+        const PARTS = { body: [], top: [], skirt: [], shoes: [], socks: [],
+                        hair: [], glasses: [], accessory: [] };
 
         function meshTriangles(mesh) {
             if (!mesh.geometry) return -1;
@@ -4825,7 +4906,9 @@
             // 옷장에서 입은 옷도 같이 센다.
             // 안 그러면 갈아입은 옷은 벗기지도 잡아당기지도 못한다.
             const roots = [currentVRM.scene];
-            if (wearVRM) roots.push(wearVRM.scene);
+            Object.keys(WEAR).forEach(k => {
+                if (WEAR[k]) roots.push(WEAR[k].vrm.scene);
+            });
 
             roots.forEach(root => root.traverse(o => {
                 if (!o.isMesh && !o.isSkinnedMesh) return;
@@ -4858,7 +4941,8 @@
             //
             // 바탕 아바타가 맨몸이 된 뒤로는(2026-09-16) 벗은 상태가
             // 정상이다. 그때도 경고를 띄우면 진짜 고장과 구별이 안 된다.
-            if (!PARTS.skirt.length && !PARTS.top.length && (wornKey || !wardrobe.length)) {
+            if (!PARTS.skirt.length && !PARTS.top.length
+                    && (wornKeyOf('outfit') || !wardrobe.length)) {
                 console.warn('[diamondAI] 옷 메시를 못 찾았다. 재질 이름을 확인하라:');
                 currentVRM.scene.traverse(o => {
                     if (!o.isMesh && !o.isSkinnedMesh) return;
@@ -6833,10 +6917,8 @@
             //
             // 자세가 다 정해진 뒤라야 한다. 앞에 두면 한 프레임 늦은 자리를
             // 베껴서 빠르게 움직일 때 옷만 뒤에 끌린다.
-            if (wearVRM) {
-                syncWear();
-                wearVRM.update(deltaTime);   // 치마 흔들림 본
-            }
+            syncWear();
+            updateWear(deltaTime);          // 치마 흔들림 본
 
 
             renderer.render(
@@ -7241,8 +7323,7 @@
             appendMessage('ai',
                 '옷장 ' + wardrobe.length + '벌'
                 + (wardrobe.length ? ' (' + wardrobe.map(w => w.key).join(', ') + ')' : '')
-                + ' | 지금 입은 것: ' + (wornKey || '없음')
-                + ' | 맞물린 본: ' + wearPairs.length + '개'
+                + ' | 걸친 것: ' + (anyWorn().map(k => k + '=' + wornKeyOf(k)).join(', ') || '없음')
                 + ' | 메시: ' + counts);
 
             return true;
