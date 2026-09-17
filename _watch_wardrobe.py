@@ -236,6 +236,31 @@ def sweep(seen, say=print):
     return n
 
 
+def _who_holds(lock):
+    """이미 도는 지킴이의 번호. 없으면 None.
+
+    적혀 있어도 그 프로그램이 죽었으면 없는 것으로 본다 — 창을 그냥
+    닫으면 빗장이 남는데, 그걸 못 지우면 다시는 못 뜬다.
+    """
+    try:
+        with open(lock, encoding='utf-8') as f:
+            pid = int((f.read() or '0').strip())
+    except (OSError, ValueError):
+        return None
+
+    if pid <= 0 or pid == os.getpid():
+        return None
+
+    try:
+        import subprocess
+        out = subprocess.run(
+            ['tasklist', '/FI', f'PID eq {pid}', '/NH'],
+            capture_output=True, text=True, timeout=10).stdout
+        return pid if str(pid) in out else None
+    except Exception:
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser(description='폴더에 넣은 VRM 을 옷장에 건다')
     ap.add_argument('--once', action='store_true',
@@ -253,6 +278,22 @@ def main():
     if not os.path.exists(BASE):
         print(f'바탕 아바타가 없습니다: {BASE}')
         return 1
+
+    # 하나만 돈다.
+    #
+    # 두 번 눌러 띄우는 물건이라 사람은 실수로 여러 번 누른다. 여럿이
+    # 돌면 같은 파일을 서로 집어 반쯤 구운 것이 섞인다.
+    lock = os.path.join(DROP, '.지킴이')
+
+    if not a.once:
+        old = _who_holds(lock)
+
+        if old:
+            print(f'이미 돌고 있습니다 (PID {old}). 이 창은 닫아도 됩니다.')
+            return 0
+
+        with open(lock, 'w', encoding='utf-8') as f:
+            f.write(str(os.getpid()))
 
     print('옷장 지킴이')
     print('  보는 곳 : ' + DROP)
